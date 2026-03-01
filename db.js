@@ -69,13 +69,18 @@ function initDb() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_metrics_pnl ON trades_metrics(pnl);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_metrics_vol ON trades_metrics(volume);`);
 
-  // 3. TRIGGERS POUR CALCULER ET SAUVEGARDER UNE SEULE FOIS
+  // ------------------------------------------------------------------
+  // 3. TRIGGERS (Corrigés pour éviter le bug UNIQUE constraint failed)
+  // ------------------------------------------------------------------
+  db.exec(`DROP TRIGGER IF EXISTS trg_metrics_insert;`);
+  db.exec(`DROP TRIGGER IF EXISTS trg_metrics_update;`);
+
   db.exec(`
-    CREATE TRIGGER IF NOT EXISTS trg_metrics_insert
+    CREATE TRIGGER trg_metrics_insert
     AFTER INSERT ON trades
     WHEN new.state IN (1, 2)
     BEGIN
-      INSERT OR REPLACE INTO trades_metrics (id, trader, volume, pnl)
+      INSERT INTO trades_metrics (id, trader, volume, pnl)
       VALUES (
         new.id, new.trader,
         -- VOLUME
@@ -84,16 +89,19 @@ function initDb() {
         CASE WHEN new.state = 2 THEN 
           CAST((CASE WHEN new.isLong = 1 THEN (new.closePrice - new.openPrice) ELSE (new.openPrice - new.closePrice) END) * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER)
         ELSE NULL END
-      );
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        volume = excluded.volume,
+        pnl = excluded.pnl;
     END;
   `);
 
   db.exec(`
-    CREATE TRIGGER IF NOT EXISTS trg_metrics_update
+    CREATE TRIGGER trg_metrics_update
     AFTER UPDATE OF state, closePrice, lotSize, openPrice ON trades
     WHEN new.state IN (1, 2)
     BEGIN
-      INSERT OR REPLACE INTO trades_metrics (id, trader, volume, pnl)
+      INSERT INTO trades_metrics (id, trader, volume, pnl)
       VALUES (
         new.id, new.trader,
         -- VOLUME
@@ -102,20 +110,26 @@ function initDb() {
         CASE WHEN new.state = 2 THEN 
           CAST((CASE WHEN new.isLong = 1 THEN (new.closePrice - new.openPrice) ELSE (new.openPrice - new.closePrice) END) * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER)
         ELSE NULL END
-      );
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        volume = excluded.volume,
+        pnl = excluded.pnl;
     END;
   `);
 
-  // 4. RATTRAPAGE DES ANCIENS TRADES (Au démarrage)
+  // 4. RATTRAPAGE DES ANCIENS TRADES (Corrigé avec UPSERT)
   db.exec(`
-    INSERT OR IGNORE INTO trades_metrics (id, trader, volume, pnl)
+    INSERT INTO trades_metrics (id, trader, volume, pnl)
     SELECT id, trader,
       CAST(openPrice * lotSize * (CASE assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER),
       CASE WHEN state = 2 THEN 
         CAST((CASE WHEN isLong = 1 THEN (closePrice - openPrice) ELSE (openPrice - closePrice) END) * lotSize * (CASE assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER)
       ELSE NULL END
     FROM trades
-    WHERE state IN (1, 2);
+    WHERE state IN (1, 2)
+    ON CONFLICT(id) DO UPDATE SET
+      volume = excluded.volume,
+      pnl = excluded.pnl;
   `);
 }
 
@@ -161,16 +175,14 @@ const stmt = {
     FROM trades;
   `),
 
-  // --- REQUÊTES PNL ET VOLUME (Lisent directement les données stockées "en dur") ---
+  // --- REQUÊTES PNL ET VOLUME ---
   
-  // Total PnL et Volume d'un trader
   getTraderMetrics: db.prepare(`
     SELECT trader, SUM(pnl) as totalPnl, SUM(volume) as totalVolume
     FROM trades_metrics
     WHERE trader = ?;
   `),
 
-  // Top Traders par Volume
   getTopTradersByVolume: db.prepare(`
     SELECT trader, SUM(volume) as totalVolume
     FROM trades_metrics
@@ -179,7 +191,6 @@ const stmt = {
     LIMIT ?;
   `),
 
-  // Top Traders par PnL
   getTopTradersByPnl: db.prepare(`
     SELECT trader, SUM(pnl) as totalPnl
     FROM trades_metrics
@@ -189,7 +200,6 @@ const stmt = {
     LIMIT ?;
   `),
 
-  // Meilleurs trades individuels par PnL
   getTopTradesByPnl: db.prepare(`
     SELECT t.*, m.pnl, m.volume 
     FROM trades_metrics m
