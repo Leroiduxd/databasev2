@@ -83,6 +83,97 @@ readApp.get("/stats/open-trades", (req, res) => {
 });
 
 // ---------------------------------------
+// --- NOUVEAUX ENDPOINTS METRIQUES (PNL, VOLUME, CLASSEMENTS) ---
+
+// Liste brute de tous les wallets uniques
+readApp.get("/traders/list", (req, res) => {
+  try {
+    const rows = stmt.getAllUniqueTraders.all();
+    const wallets = rows.map((r) => r.trader);
+    res.json({ success: true, count: wallets.length, wallets });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch traders list" });
+  }
+});
+
+// Top Traders par nombre de trades
+readApp.get("/traders/top", (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 10, 100);
+    const rows = stmt.getTopTradersAll.all(limit);
+    res.json({ success: true, limit, data: rows });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch top traders" });
+  }
+});
+
+// Top Traders avec le plus de trades ACTIFS (state = 1)
+readApp.get("/traders/top/active", (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 10, 100);
+    const rows = stmt.getTopTradersByState.all(1, limit);
+    res.json({ success: true, limit, data: rows });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch top active traders" });
+  }
+});
+
+// PnL et Volume total pour un trader spécifique
+readApp.get("/metrics/trader/:address", (req, res) => {
+  try {
+    const trader = normalizeAddress(req.params.address);
+    if (!trader.startsWith("0x") || trader.length < 10) {
+      return res.status(400).json({ error: "Invalid address" });
+    }
+    const row = stmt.getTraderMetrics.get(trader);
+    
+    // Si le trader n'a pas de métriques, on renvoie 0
+    res.json({ 
+      success: true, 
+      trader, 
+      metrics: {
+        totalPnl: row && row.totalPnl ? row.totalPnl : 0,
+        totalVolume: row && row.totalVolume ? row.totalVolume : 0
+      } 
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch trader metrics" });
+  }
+});
+
+// Top Traders classés par Volume total
+readApp.get("/metrics/top/volume", (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 10, 100);
+    const rows = stmt.getTopTradersByVolume.all(limit);
+    res.json({ success: true, limit, data: rows });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch top volume traders" });
+  }
+});
+
+// Top Traders classés par PnL total (les plus rentables)
+readApp.get("/metrics/top/pnl", (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 10, 100);
+    const rows = stmt.getTopTradersByPnl.all(limit);
+    res.json({ success: true, limit, data: rows });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch top PnL traders" });
+  }
+});
+
+// Top Trades individuels classés par PnL (les trades les plus gagnants)
+readApp.get("/metrics/top/trades", (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 10, 100);
+    const rows = stmt.getTopTradesByPnl.all(limit);
+    res.json({ success: true, limit, data: rows });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch top trades by PnL" });
+  }
+});
+// ---------------------------------------------------------------
 
 // <-- AJOUT : NOUVEAU ENDPOINT POUR LIRE LES EXPOSITIONS
 readApp.get("/exposures", (req, res) => {

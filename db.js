@@ -16,6 +16,7 @@ db.pragma("journal_mode = WAL");
 db.pragma("synchronous = NORMAL");
 
 function initDb() {
+  // 1. TABLE DE BASE INTACTE
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades (
       id INTEGER PRIMARY KEY,           -- <-- YOU provide the trade id
@@ -47,16 +48,75 @@ function initDb() {
     );
   `);
 
-  // Indexes
   db.exec(`CREATE INDEX IF NOT EXISTS idx_trader ON trades(trader);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_trader_state_id ON trades(trader, state, id);`);
-
-  // Matching entry (state=0)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_entry_fast ON trades(assetId, state, isLimit, isLong, openPrice);`);
-
-  // Matching exits (state=1)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sl_fast ON trades(assetId, state, isLong, stopLoss);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tp_fast ON trades(assetId, state, isLong, takeProfit);`);
+
+  // ------------------------------------------------------------------
+  // 2. NOUVELLE TABLE DES MÉTRIQUES (Stockage "en dur")
+  // ------------------------------------------------------------------
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trades_metrics (
+      id INTEGER PRIMARY KEY,           
+      trader TEXT NOT NULL,
+      volume INTEGER,                   -- Calculé pour state 1 et 2
+      pnl INTEGER                       -- Calculé uniquement pour state 2
+    );
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_metrics_trader ON trades_metrics(trader);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_metrics_pnl ON trades_metrics(pnl);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_metrics_vol ON trades_metrics(volume);`);
+
+  // 3. TRIGGERS POUR CALCULER ET SAUVEGARDER UNE SEULE FOIS
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_metrics_insert
+    AFTER INSERT ON trades
+    WHEN new.state IN (1, 2)
+    BEGIN
+      INSERT OR REPLACE INTO trades_metrics (id, trader, volume, pnl)
+      VALUES (
+        new.id, new.trader,
+        -- VOLUME
+        CAST(new.openPrice * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER),
+        -- PNL (Seulement si state = 2)
+        CASE WHEN new.state = 2 THEN 
+          CAST((CASE WHEN new.isLong = 1 THEN (new.closePrice - new.openPrice) ELSE (new.openPrice - new.closePrice) END) * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER)
+        ELSE NULL END
+      );
+    END;
+  `);
+
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_metrics_update
+    AFTER UPDATE OF state, closePrice, lotSize, openPrice ON trades
+    WHEN new.state IN (1, 2)
+    BEGIN
+      INSERT OR REPLACE INTO trades_metrics (id, trader, volume, pnl)
+      VALUES (
+        new.id, new.trader,
+        -- VOLUME
+        CAST(new.openPrice * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER),
+        -- PNL (Seulement si state = 2)
+        CASE WHEN new.state = 2 THEN 
+          CAST((CASE WHEN new.isLong = 1 THEN (new.closePrice - new.openPrice) ELSE (new.openPrice - new.closePrice) END) * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER)
+        ELSE NULL END
+      );
+    END;
+  `);
+
+  // 4. RATTRAPAGE DES ANCIENS TRADES (Au démarrage)
+  db.exec(`
+    INSERT OR IGNORE INTO trades_metrics (id, trader, volume, pnl)
+    SELECT id, trader,
+      CAST(openPrice * lotSize * (CASE assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER),
+      CASE WHEN state = 2 THEN 
+        CAST((CASE WHEN isLong = 1 THEN (closePrice - openPrice) ELSE (openPrice - closePrice) END) * lotSize * (CASE assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER)
+      ELSE NULL END
+    FROM trades
+    WHERE state IN (1, 2);
+  `);
 }
 
 initDb();
@@ -67,7 +127,6 @@ initDb();
 const stmt = {
   getTradeById: db.prepare(`SELECT * FROM trades WHERE id = ?;`),
 
-  // --- NOUVELLES REQUÊTES ---
   getMaxTradeId: db.prepare(`SELECT MAX(id) as maxId FROM trades;`),
   
   getTotalTraders: db.prepare(`SELECT COUNT(DISTINCT trader) as totalTraders FROM trades;`),
@@ -78,7 +137,68 @@ const stmt = {
     WHERE state = 1
     GROUP BY assetId, isLong;
   `),
-  // --------------------------
+
+  // --- STATS BASIQUES DES TRADERS ---
+  getTopTradersAll: db.prepare(`
+    SELECT trader, COUNT(*) as count 
+    FROM trades 
+    GROUP BY trader 
+    ORDER BY count DESC 
+    LIMIT ?;
+  `),
+
+  getTopTradersByState: db.prepare(`
+    SELECT trader, COUNT(*) as count 
+    FROM trades 
+    WHERE state = ? 
+    GROUP BY trader 
+    ORDER BY count DESC 
+    LIMIT ?;
+  `),
+
+  getAllUniqueTraders: db.prepare(`
+    SELECT DISTINCT trader 
+    FROM trades;
+  `),
+
+  // --- REQUÊTES PNL ET VOLUME (Lisent directement les données stockées "en dur") ---
+  
+  // Total PnL et Volume d'un trader
+  getTraderMetrics: db.prepare(`
+    SELECT trader, SUM(pnl) as totalPnl, SUM(volume) as totalVolume
+    FROM trades_metrics
+    WHERE trader = ?;
+  `),
+
+  // Top Traders par Volume
+  getTopTradersByVolume: db.prepare(`
+    SELECT trader, SUM(volume) as totalVolume
+    FROM trades_metrics
+    GROUP BY trader
+    ORDER BY totalVolume DESC
+    LIMIT ?;
+  `),
+
+  // Top Traders par PnL
+  getTopTradersByPnl: db.prepare(`
+    SELECT trader, SUM(pnl) as totalPnl
+    FROM trades_metrics
+    WHERE pnl IS NOT NULL
+    GROUP BY trader
+    ORDER BY totalPnl DESC
+    LIMIT ?;
+  `),
+
+  // Meilleurs trades individuels par PnL
+  getTopTradesByPnl: db.prepare(`
+    SELECT t.*, m.pnl, m.volume 
+    FROM trades_metrics m
+    JOIN trades t ON t.id = m.id
+    WHERE m.pnl IS NOT NULL
+    ORDER BY m.pnl DESC
+    LIMIT ?;
+  `),
+  // --------------------------------------------------------------------------------
 
   getTraderIdsAll: db.prepare(`
     SELECT id FROM trades
@@ -92,7 +212,6 @@ const stmt = {
     ORDER BY id DESC;
   `),
 
-  // Entry match (state=0): returns {id, kind}
   matchEntry: db.prepare(`
     SELECT id,
            CASE WHEN isLimit = 1 THEN 'limit' ELSE 'stop' END AS kind
@@ -112,7 +231,6 @@ const stmt = {
       );
   `),
 
-  // Exits match (state=1): returns {id, kind} where kind is stopLoss/takeProfit
   matchExits: db.prepare(`
     SELECT id,
            CASE
@@ -147,7 +265,6 @@ const stmt = {
 // WRITE statements
 // --------------------
 
-// Full UPSERT (atomic): insert if missing, update if exists.
 const upsertTradeSql = `
   INSERT INTO trades (
     id, trader, assetId, isLong, isLimit, leverage,
@@ -181,7 +298,6 @@ const upsertTradeSql = `
 
 stmt.upsertTrade = db.prepare(upsertTradeSql);
 
-// Partial patch (common updates)
 stmt.patchTrade = db.prepare(`
   UPDATE trades SET
     state = COALESCE(@state, state),
@@ -195,7 +311,6 @@ stmt.patchTrade = db.prepare(`
   WHERE id = @id;
 `);
 
-// Patch state (+ closePrice + closedLotSize optional)
 stmt.patchState = db.prepare(`
   UPDATE trades SET
     state = COALESCE(@state, state),
@@ -205,7 +320,6 @@ stmt.patchState = db.prepare(`
   WHERE id = @id
 `);
 
-// Patch SL/TP
 stmt.patchSLTP = db.prepare(`
   UPDATE trades SET
     stopLoss = COALESCE(@stopLoss, stopLoss),
