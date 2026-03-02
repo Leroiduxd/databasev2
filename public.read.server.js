@@ -82,6 +82,24 @@ readApp.get("/stats/open-trades", (req, res) => {
   }
 });
 
+// Volume total exécuté sur les 24 dernières heures
+readApp.get("/stats/volume-24h", (req, res) => {
+  try {
+    // On calcule le timestamp d'il y a 24h pile (en secondes)
+    const twentyFourHoursAgo = Math.floor(Date.now() / 1000) - 86400;
+    
+    // On passe ce timestamp à notre requête SQL
+    const row = stmt.getVolume24h.get(twentyFourHoursAgo);
+    
+    res.json({ 
+      success: true, 
+      volume24h: row && row.volume24h ? row.volume24h : 0
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch 24h volume" });
+  }
+});
+
 // ---------------------------------------
 // --- NOUVEAUX ENDPOINTS METRIQUES (PNL, VOLUME, CLASSEMENTS) ---
 

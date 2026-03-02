@@ -269,6 +269,14 @@ const stmt = {
         ))
       );
   `),
+
+  getVolume24h: db.prepare(`
+    SELECT SUM(m.volume) as volume24h
+    FROM trades_metrics m
+    JOIN trades t ON t.id = m.id
+    WHERE t.state IN (1, 2) 
+      AND t.openTimestamp >= ?;
+  `),
 };
 
 // --------------------
@@ -336,6 +344,8 @@ stmt.patchSLTP = db.prepare(`
     takeProfit = COALESCE(@takeProfit, takeProfit)
   WHERE id = @id
 `);
+
+
 
 const tx = {
   upsertTrade: db.transaction((payload) => {
