@@ -139,6 +139,7 @@ initDb();
 // READ statements
 // --------------------
 const stmt = {
+
   getTradeById: db.prepare(`SELECT * FROM trades WHERE id = ?;`),
 
   getMaxTradeId: db.prepare(`SELECT MAX(id) as maxId FROM trades;`),
@@ -150,6 +151,36 @@ const stmt = {
     FROM trades
     WHERE state = 1
     GROUP BY assetId, isLong;
+  `),
+  // --- LEADERBOARD COMBINÉ (Trades, Volume, PnL) ---
+  getLeaderboardByPnl: db.prepare(`
+    SELECT t.trader, COUNT(t.id) as totalTrades, COALESCE(SUM(m.volume), 0) as totalVolume, COALESCE(SUM(m.pnl), 0) as totalPnl
+    FROM trades t LEFT JOIN trades_metrics m ON t.id = m.id
+    GROUP BY t.trader ORDER BY totalPnl DESC LIMIT ?;
+  `),
+  getLeaderboardByVolume: db.prepare(`
+    SELECT t.trader, COUNT(t.id) as totalTrades, COALESCE(SUM(m.volume), 0) as totalVolume, COALESCE(SUM(m.pnl), 0) as totalPnl
+    FROM trades t LEFT JOIN trades_metrics m ON t.id = m.id
+    GROUP BY t.trader ORDER BY totalVolume DESC LIMIT ?;
+  `),
+  getLeaderboardByActivity: db.prepare(`
+    SELECT t.trader, COUNT(t.id) as totalTrades, COALESCE(SUM(m.volume), 0) as totalVolume, COALESCE(SUM(m.pnl), 0) as totalPnl
+    FROM trades t LEFT JOIN trades_metrics m ON t.id = m.id
+    GROUP BY t.trader ORDER BY totalTrades DESC LIMIT ?;
+  `),
+
+  // --- RANGS D'UN TRADER SPÉCIFIQUE ---
+  getTraderRankByActivity: db.prepare(`
+    WITH Ranked AS (SELECT trader, COUNT(*) as tradesCount, RANK() OVER (ORDER BY COUNT(*) DESC) as rank FROM trades GROUP BY trader)
+    SELECT rank, tradesCount FROM Ranked WHERE trader = ?;
+  `),
+  getTraderRankByVolume: db.prepare(`
+    WITH Ranked AS (SELECT trader, SUM(volume) as totalVolume, RANK() OVER (ORDER BY COALESCE(SUM(volume), 0) DESC) as rank FROM trades_metrics GROUP BY trader)
+    SELECT rank, totalVolume FROM Ranked WHERE trader = ?;
+  `),
+  getTraderRankByPnl: db.prepare(`
+    WITH Ranked AS (SELECT trader, SUM(pnl) as totalPnl, RANK() OVER (ORDER BY COALESCE(SUM(pnl), 0) DESC) as rank FROM trades_metrics WHERE pnl IS NOT NULL GROUP BY trader)
+    SELECT rank, totalPnl FROM Ranked WHERE trader = ?;
   `),
 
   // --- STATS BASIQUES DES TRADERS ---
@@ -277,6 +308,7 @@ const stmt = {
     WHERE t.state IN (1, 2) 
       AND t.openTimestamp >= ?;
   `),
+  
 };
 
 // --------------------

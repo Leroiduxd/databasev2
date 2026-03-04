@@ -289,6 +289,55 @@ readApp.get("/match/exits", (req, res) => {
   }
 });
 
+// --- LEADERBOARD COMPLET ---
+// GET /traders/leaderboard?limit=100&sortBy=pnl (ou "volume", ou "trades")
+readApp.get("/traders/leaderboard", (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 100, 500); 
+    const sortBy = (req.query.sortBy || "pnl").toLowerCase();
+
+    let rows;
+    if (sortBy === "volume") {
+      rows = stmt.getLeaderboardByVolume.all(limit);
+    } else if (sortBy === "trades") {
+      rows = stmt.getLeaderboardByActivity.all(limit);
+    } else {
+      rows = stmt.getLeaderboardByPnl.all(limit);
+    }
+
+    res.json({ success: true, limit, sortBy, data: rows });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch leaderboard" });
+  }
+});
+
+// --- RANGS ET STATS D'UN TRADER SPÉCIFIQUE ---
+// GET /trader/:address/ranks
+readApp.get("/trader/:address/ranks", (req, res) => {
+  try {
+    const trader = normalizeAddress(req.params.address);
+    if (!trader.startsWith("0x") || trader.length < 10) {
+      return res.status(400).json({ error: "Invalid address" });
+    }
+
+    const activityRow = stmt.getTraderRankByActivity.get(trader);
+    const volumeRow = stmt.getTraderRankByVolume.get(trader);
+    const pnlRow = stmt.getTraderRankByPnl.get(trader);
+
+    res.json({
+      success: true,
+      trader,
+      ranks: {
+        activity: activityRow ? { rank: activityRow.rank, value: activityRow.tradesCount } : { rank: null, value: 0 },
+        volume: volumeRow ? { rank: volumeRow.rank, value: volumeRow.totalVolume } : { rank: null, value: 0 },
+        pnl: pnlRow ? { rank: pnlRow.rank, value: pnlRow.totalPnl } : { rank: null, value: 0 }
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch trader ranks" });
+  }
+});
+
 // Public server listens on all interfaces
 readApp.listen(PUBLIC_PORT, "0.0.0.0", () => {
   console.log(`Public READ API: http://0.0.0.0:${PUBLIC_PORT}`);
