@@ -291,23 +291,30 @@ readApp.get("/match/exits", (req, res) => {
 
 // --- LEADERBOARD COMPLET ---
 // GET /traders/leaderboard?limit=100&sortBy=pnl (ou "volume", ou "trades")
+// --- LEADERBOARD COMPLET (3 LISTES D'UN COUP) ---
+// GET /traders/leaderboard?limit=100
 readApp.get("/traders/leaderboard", (req, res) => {
   try {
+    // 100 par défaut (pour les 3 listes)
     const limit = Math.min(Number(req.query.limit) || 100, 500); 
-    const sortBy = (req.query.sortBy || "pnl").toLowerCase();
 
-    let rows;
-    if (sortBy === "volume") {
-      rows = stmt.getLeaderboardByVolume.all(limit);
-    } else if (sortBy === "trades") {
-      rows = stmt.getLeaderboardByActivity.all(limit);
-    } else {
-      rows = stmt.getLeaderboardByPnl.all(limit);
-    }
+    // On récupère les 3 classements indépendamment
+    const topByPnl = stmt.getLeaderboardByPnl.all(limit);
+    const topByVolume = stmt.getLeaderboardByVolume.all(limit);
+    const topByTrades = stmt.getLeaderboardByActivity.all(limit);
 
-    res.json({ success: true, limit, sortBy, data: rows });
+    // On renvoie tout dans un seul objet bien structuré
+    res.json({ 
+      success: true, 
+      limit, 
+      data: {
+        topByPnl: topByPnl,
+        topByVolume: topByVolume,
+        topByTrades: topByTrades
+      }
+    });
   } catch (e) {
-    res.status(500).json({ error: "Failed to fetch leaderboard" });
+    res.status(500).json({ error: "Failed to fetch leaderboards" });
   }
 });
 
