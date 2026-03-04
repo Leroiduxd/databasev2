@@ -289,29 +289,23 @@ readApp.get("/match/exits", (req, res) => {
   }
 });
 
-// --- LEADERBOARD COMPLET ---
-// GET /traders/leaderboard?limit=100&sortBy=pnl (ou "volume", ou "trades")
-// --- LEADERBOARD COMPLET (3 LISTES D'UN COUP) ---
-// GET /traders/leaderboard?limit=100
+// --- LEADERBOARD COMPLET (3 LISTES TOTALEMENT DISTINCTES) ---
+// GET /traders/leaderboard
 readApp.get("/traders/leaderboard", (req, res) => {
   try {
-    // 100 par défaut (pour les 3 listes)
-    const limit = Math.min(Number(req.query.limit) || 100, 500); 
+    const limit = 100; // Tu veux les 100 premiers de chaque
 
-    // On récupère les 3 classements indépendamment
-    const topByPnl = stmt.getLeaderboardByPnl.all(limit);
-    const topByVolume = stmt.getLeaderboardByVolume.all(limit);
-    const topByTrades = stmt.getLeaderboardByActivity.all(limit);
+    // On tire les 3 listes séparément avec juste leur stat dédiée
+    const topByPnl = stmt.getTop100Pnl.all(limit);
+    const topByVolume = stmt.getTop100Volume.all(limit);
+    const topByTrades = stmt.getTop100Trades.all(limit);
 
-    // On renvoie tout dans un seul objet bien structuré
+    // On renvoie un JSON clair et net
     res.json({ 
       success: true, 
-      limit, 
-      data: {
-        topByPnl: topByPnl,
-        topByVolume: topByVolume,
-        topByTrades: topByTrades
-      }
+      topByPnl: topByPnl,       // ex: [{ trader: "0x...", pnl: 50000 }]
+      topByVolume: topByVolume, // ex: [{ trader: "0x...", volume: 1500000 }]
+      topByTrades: topByTrades  // ex: [{ trader: "0x...", totalTrades: 142 }]
     });
   } catch (e) {
     res.status(500).json({ error: "Failed to fetch leaderboards" });

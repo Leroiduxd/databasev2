@@ -152,21 +152,34 @@ const stmt = {
     WHERE state = 1
     GROUP BY assetId, isLong;
   `),
-  // --- LEADERBOARD COMBINÉ (Trades, Volume, PnL) ---
-  getLeaderboardByPnl: db.prepare(`
-    SELECT t.trader, COUNT(t.id) as totalTrades, COALESCE(SUM(m.volume), 0) as totalVolume, COALESCE(SUM(m.pnl), 0) as totalPnl
-    FROM trades t LEFT JOIN trades_metrics m ON t.id = m.id
-    GROUP BY t.trader ORDER BY totalPnl DESC LIMIT ?;
+  // --- LES 3 REQUÊTES STRICTEMENT SÉPARÉES ---
+  
+  // 1. Juste les 100 premiers par PNL (avec juste leur PNL)
+  getTop100Pnl: db.prepare(`
+    SELECT trader, SUM(pnl) as pnl
+    FROM trades_metrics
+    WHERE pnl IS NOT NULL
+    GROUP BY trader
+    ORDER BY pnl DESC
+    LIMIT ?;
   `),
-  getLeaderboardByVolume: db.prepare(`
-    SELECT t.trader, COUNT(t.id) as totalTrades, COALESCE(SUM(m.volume), 0) as totalVolume, COALESCE(SUM(m.pnl), 0) as totalPnl
-    FROM trades t LEFT JOIN trades_metrics m ON t.id = m.id
-    GROUP BY t.trader ORDER BY totalVolume DESC LIMIT ?;
+
+  // 2. Juste les 100 premiers par Volume (avec juste leur Volume)
+  getTop100Volume: db.prepare(`
+    SELECT trader, SUM(volume) as volume
+    FROM trades_metrics
+    GROUP BY trader
+    ORDER BY volume DESC
+    LIMIT ?;
   `),
-  getLeaderboardByActivity: db.prepare(`
-    SELECT t.trader, COUNT(t.id) as totalTrades, COALESCE(SUM(m.volume), 0) as totalVolume, COALESCE(SUM(m.pnl), 0) as totalPnl
-    FROM trades t LEFT JOIN trades_metrics m ON t.id = m.id
-    GROUP BY t.trader ORDER BY totalTrades DESC LIMIT ?;
+
+  // 3. Juste les 100 premiers par Nombre de trades (avec juste leur nombre)
+  getTop100Trades: db.prepare(`
+    SELECT trader, COUNT(id) as totalTrades
+    FROM trades
+    GROUP BY trader
+    ORDER BY totalTrades DESC
+    LIMIT ?;
   `),
 
   // --- RANGS D'UN TRADER SPÉCIFIQUE ---
