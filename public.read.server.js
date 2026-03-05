@@ -415,6 +415,11 @@ readApp.get("/trader/:address/share", (req, res) => {
   }
 });
 
+// Public server listens on all interfaces
+readApp.listen(PUBLIC_PORT, "0.0.0.0", () => {
+  console.log(`Public READ API: http://0.0.0.0:${PUBLIC_PORT}`);
+});
+
 // --------------------
 // PRIVATE WRITE server (LOCAL ONLY)
 // --------------------
