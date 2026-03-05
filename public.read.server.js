@@ -8,6 +8,7 @@ const express = require("express");
 const cors = require("cors"); // <-- AJOUT DE CORS ICI
 const { stmt } = require("./db");
 const writeRoutes = require("./write.routes");
+const { generateTraderCard } = require("./services/image.service");
 
 // <-- AJOUT : Import du service des expositions
 const { getAllExposures } = require("./services/exposures"); 
@@ -336,6 +337,41 @@ readApp.get("/trader/:address/ranks", (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: "Failed to fetch trader ranks" });
+  }
+});
+
+// GET /trader/:address/card.png - Génère la carte X/Twitter à la volée
+readApp.get("/trader/:address/card.png", (req, res) => {
+  try {
+    const address = normalizeAddress(req.params.address);
+    if (!address || address.length < 10) {
+      return res.status(400).send("Invalid address");
+    }
+
+    // 1. Récupération instantanée des stats depuis SQLite
+    const actRow = stmt.getTraderRankByActivity.get(address);
+    const volRow = stmt.getTraderRankByVolume.get(address);
+    const pnlRow = stmt.getTraderRankByPnl.get(address);
+
+    const ranks = {
+      activity: { rank: actRow?.rank, value: actRow?.tradesCount || 0 },
+      volume: { rank: volRow?.rank, value: volRow?.totalVolume || 0 },
+      pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
+    };
+
+    // 2. Appel de ton nouveau service pour dessiner le Buffer PNG
+    const pngBuffer = generateTraderCard({ address, ranks });
+
+    // 3. Envoi au client sans stockage
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Content-Disposition", `inline; filename="brokex-${address}.png"`);
+    
+    res.send(pngBuffer);
+
+  } catch (err) {
+    console.error("Image generation error:", err);
+    res.status(500).send("Failed to generate image");
   }
 });
 
