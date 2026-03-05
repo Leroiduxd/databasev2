@@ -340,7 +340,7 @@ readApp.get("/trader/:address/ranks", (req, res) => {
   }
 });
 
-// GET /trader/:address/share - Page HTML pour les réseaux sociaux (Twitter, Discord, etc.)
+// GET /trader/:address/share - Page HTML simple pour afficher l'image et les meta-tags (Twitter, Discord, etc.)
 readApp.get("/trader/:address/share", (req, res) => {
   try {
     const address = normalizeAddress(req.params.address);
@@ -348,12 +348,13 @@ readApp.get("/trader/:address/share", (req, res) => {
       return res.status(400).send("Invalid address");
     }
 
-    // L'URL de l'image que ton API génère
+    const shortAddress = address.slice(0, 6) + "..." + address.slice(-4);
+
+    // L'URL exacte de l'image PNG générée par ton API
     const imageUrl = `https://api.brokex.trade/trader/${address}/card.png`;
     
-    // L'URL de ton vrai site web où l'utilisateur doit atterrir quand il clique sur la carte Twitter
-    // À MODIFIER avec l'URL de ton front-end
-    const frontEndUrl = `https://brokex.trade/trader/${address}`; 
+    // L'URL de cette page (pour les meta tags)
+    const shareUrl = `https://api.brokex.trade/trader/${address}/share`;
 
     const html = `
       <!DOCTYPE html>
@@ -361,14 +362,12 @@ readApp.get("/trader/:address/share", (req, res) => {
       <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Brokex Trader Profile</title>
+          <title>Brokex Trader Profile: ${shortAddress}</title>
 
-          <meta http-equiv="refresh" content="0; url=${frontEndUrl}" />
-
-          <meta property="og:title" content="Brokex Trader: ${address.slice(0, 6)}...${address.slice(-4)}" />
+          <meta property="og:title" content="Brokex Trader Performance" />
           <meta property="og:description" content="Check out my trading stats and rank on Brokex!" />
           <meta property="og:image" content="${imageUrl}" />
-          <meta property="og:url" content="${frontEndUrl}" />
+          <meta property="og:url" content="${shareUrl}" />
           <meta property="og:type" content="website" />
 
           <meta name="twitter:card" content="summary_large_image" />
@@ -376,13 +375,34 @@ readApp.get("/trader/:address/share", (req, res) => {
           <meta name="twitter:description" content="Check out my trading stats and rank on Brokex!" />
           <meta name="twitter:image" content="${imageUrl}" />
           
-          <script>
-            // Redirection JavaScript en renfort au cas où la balise meta est ignorée
-            window.location.href = "${frontEndUrl}";
-          </script>
+          <style>
+            body {
+              background-color: #05060a; 
+              color: white; 
+              font-family: 'Inter', sans-serif; 
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              margin: 0;
+            }
+            img {
+              max-width: 90%;
+              height: auto;
+              border-radius: 16px;
+              box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+              margin-bottom: 20px;
+            }
+            p {
+              color: rgba(255,255,255,0.6);
+              font-size: 14px;
+            }
+          </style>
       </head>
-      <body style="background-color: #05060a; color: white; font-family: sans-serif; text-align: center; padding-top: 50px;">
-          <p>Redirecting to Brokex...</p>
+      <body>
+          <img src="${imageUrl}" alt="Trader Stats for ${shortAddress}" />
+          <p>Brokex Stats for ${shortAddress}</p>
       </body>
       </html>
     `;
@@ -393,11 +413,6 @@ readApp.get("/trader/:address/share", (req, res) => {
   } catch (err) {
     res.status(500).send("Error generating share page");
   }
-});
-
-// Public server listens on all interfaces
-readApp.listen(PUBLIC_PORT, "0.0.0.0", () => {
-  console.log(`Public READ API: http://0.0.0.0:${PUBLIC_PORT}`);
 });
 
 // --------------------
