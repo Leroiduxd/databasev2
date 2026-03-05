@@ -11,6 +11,8 @@ const db = new Database(DB_PATH, process.env.SQL_VERBOSE === "1"
   : {}
 );
 
+const { generateAndSaveTraderCard } = require("./services/image.service");
+
 // WAL for better concurrency
 db.pragma("journal_mode = WAL");
 db.pragma("synchronous = NORMAL");
@@ -360,65 +362,80 @@ const upsertTradeSql = `
 `;
 
 stmt.upsertTrade = db.prepare(upsertTradeSql);
+stmt.patchTrade = db.prepare(`UPDATE trades SET state = COALESCE(@state, state), closePrice = COALESCE(@closePrice, closePrice), stopLoss = COALESCE(@stopLoss, stopLoss), takeProfit = COALESCE(@takeProfit, takeProfit), closedLotSize = COALESCE(@closedLotSize, closedLotSize), marginUsdc = COALESCE(@marginUsdc, marginUsdc), lpLockedCapital = COALESCE(@lpLockedCapital, lpLockedCapital), fundingIndex = COALESCE(@fundingIndex, fundingIndex) WHERE id = @id;`);
+stmt.patchState = db.prepare(`UPDATE trades SET state = COALESCE(@state, state), closePrice = COALESCE(@closePrice, closePrice), closedLotSize = COALESCE(@closedLotSize, closedLotSize), fundingIndex = COALESCE(@fundingIndex, fundingIndex) WHERE id = @id`);
+stmt.patchSLTP = db.prepare(`UPDATE trades SET stopLoss = COALESCE(@stopLoss, stopLoss), takeProfit = COALESCE(@takeProfit, takeProfit) WHERE id = @id`);
 
-stmt.patchTrade = db.prepare(`
-  UPDATE trades SET
-    state = COALESCE(@state, state),
-    closePrice = COALESCE(@closePrice, closePrice),
-    stopLoss = COALESCE(@stopLoss, stopLoss),
-    takeProfit = COALESCE(@takeProfit, takeProfit),
-    closedLotSize = COALESCE(@closedLotSize, closedLotSize),
-    marginUsdc = COALESCE(@marginUsdc, marginUsdc),
-    lpLockedCapital = COALESCE(@lpLockedCapital, lpLockedCapital),
-    fundingIndex = COALESCE(@fundingIndex, fundingIndex)
-  WHERE id = @id;
-`);
-
-stmt.patchState = db.prepare(`
-  UPDATE trades SET
-    state = COALESCE(@state, state),
-    closePrice = COALESCE(@closePrice, closePrice),
-    closedLotSize = COALESCE(@closedLotSize, closedLotSize),
-    fundingIndex = COALESCE(@fundingIndex, fundingIndex)
-  WHERE id = @id
-`);
-
-stmt.patchSLTP = db.prepare(`
-  UPDATE trades SET
-    stopLoss = COALESCE(@stopLoss, stopLoss),
-    takeProfit = COALESCE(@takeProfit, takeProfit)
-  WHERE id = @id
-`);
-
-
+// <-- AJOUT : Fonction asynchrone pour mettre à jour l'image sans bloquer la DB
+function triggerCardUpdate(trader) {
+  if (!trader) return;
+  setImmediate(() => {
+    try {
+      const actRow = stmt.getTraderRankByActivity.get(trader);
+      const volRow = stmt.getTraderRankByVolume.get(trader);
+      const pnlRow = stmt.getTraderRankByPnl.get(trader);
+      
+      const ranks = {
+        activity: { rank: actRow?.rank, value: actRow?.tradesCount || 0 },
+        volume: { rank: volRow?.rank, value: volRow?.totalVolume || 0 },
+        pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
+      };
+      
+      // Crée et remplace physiquement l'image sur le serveur !
+      generateAndSaveTraderCard(trader, ranks);
+    } catch (e) {
+      console.error("[db.js] Error updating card for", trader, e);
+    }
+  });
+}
 
 const tx = {
   upsertTrade: db.transaction((payload) => {
     stmt.upsertTrade.run(payload);
-    return stmt.getTradeById.get(payload.id);
+    const t = stmt.getTradeById.get(payload.id);
+    if (t) triggerCardUpdate(t.trader); // <-- Met à jour l'image !
+    return t;
   }),
 
   patchTrade: db.transaction((payload) => {
     const info = stmt.patchTrade.run(payload);
     if (info.changes === 0) return null;
-    return stmt.getTradeById.get(payload.id);
+    const t = stmt.getTradeById.get(payload.id);
+    if (t) triggerCardUpdate(t.trader); // <-- Met à jour l'image !
+    return t;
   }),
 
   batchPatchStates: db.transaction((patches) => {
     let updated = 0;
+    const tradersToUpdate = new Set(); // Pour ne pas générer 10 fois l'image du même mec dans un batch
+    
     for (const p of patches) {
       const info = stmt.patchState.run(p);
-      updated += info.changes ? 1 : 0;
+      if (info.changes) {
+        updated += 1;
+        const t = stmt.getTradeById.get(p.id);
+        if (t) tradersToUpdate.add(t.trader);
+      }
     }
+    
+    tradersToUpdate.forEach(triggerCardUpdate); // <-- Met à jour les images !
     return updated;
   }),
 
   batchPatchSLTP: db.transaction((patches) => {
     let updated = 0;
+    const tradersToUpdate = new Set();
+    
     for (const p of patches) {
       const info = stmt.patchSLTP.run(p);
-      updated += info.changes ? 1 : 0;
+      if (info.changes) {
+        updated += 1;
+        const t = stmt.getTradeById.get(p.id);
+        if (t) tradersToUpdate.add(t.trader);
+      }
     }
+    
+    tradersToUpdate.forEach(triggerCardUpdate); // <-- Met à jour les images !
     return updated;
   })
 };

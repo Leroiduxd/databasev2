@@ -9,6 +9,7 @@ const cors = require("cors"); // <-- AJOUT DE CORS ICI
 const { stmt } = require("./db");
 const writeRoutes = require("./write.routes");
 const { generateTraderCard } = require("./services/image.service");
+const path = require("path");
 
 // <-- AJOUT : Import du service des expositions
 const { getAllExposures } = require("./services/exposures"); 
@@ -43,6 +44,8 @@ function parseMarketE6(query) {
 // PUBLIC READ server
 // --------------------
 const readApp = express();
+// <-- AJOUT : On rend le dossier des images accessible publiquement !
+readApp.use("/cards", express.static(path.join(__dirname, "public/cards")));
 
 // <-- AJOUT DU MIDDLEWARE CORS POUR L'API PUBLIQUE
 readApp.use(cors()); 
@@ -340,7 +343,7 @@ readApp.get("/trader/:address/ranks", (req, res) => {
   }
 });
 
-// GET /trader/:address/share - Page HTML simple pour afficher l'image et les meta-tags (Twitter, Discord, etc.)
+// GET /trader/:address/share - Page HTML spéciale pour le partage sur X/Twitter/Discord
 readApp.get("/trader/:address/share", (req, res) => {
   try {
     const address = normalizeAddress(req.params.address);
@@ -350,10 +353,9 @@ readApp.get("/trader/:address/share", (req, res) => {
 
     const shortAddress = address.slice(0, 6) + "..." + address.slice(-4);
 
-    // L'URL exacte de l'image PNG générée par ton API
-    const imageUrl = `https://api.brokex.trade/trader/${address}/card.png`;
-    
-    // L'URL de cette page (pour les meta tags)
+    // On rajoute ?v=Timestamp pour forcer Twitter à charger la nouvelle image mise à jour par db.js
+    const cacheBuster = Date.now();
+    const staticImageUrl = `https://api.brokex.trade/cards/${address}.png?v=${cacheBuster}`;
     const shareUrl = `https://api.brokex.trade/trader/${address}/share`;
 
     const html = `
@@ -362,46 +364,26 @@ readApp.get("/trader/:address/share", (req, res) => {
       <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Brokex Trader Profile: ${shortAddress}</title>
+          <title>Brokex Trader: ${shortAddress}</title>
 
           <meta property="og:title" content="Brokex Trader Performance" />
           <meta property="og:description" content="Check out my trading stats and rank on Brokex!" />
-          <meta property="og:image" content="${imageUrl}" />
+          <meta property="og:image" content="${staticImageUrl}" />
           <meta property="og:url" content="${shareUrl}" />
           <meta property="og:type" content="website" />
 
           <meta name="twitter:card" content="summary_large_image" />
           <meta name="twitter:title" content="Brokex Trader Performance" />
           <meta name="twitter:description" content="Check out my trading stats and rank on Brokex!" />
-          <meta name="twitter:image" content="${imageUrl}" />
+          <meta name="twitter:image" content="${staticImageUrl}" />
           
           <style>
-            body {
-              background-color: #05060a; 
-              color: white; 
-              font-family: 'Inter', sans-serif; 
-              display: flex;
-              flex-direction: column;
-              justify-content: center;
-              align-items: center;
-              min-height: 100vh;
-              margin: 0;
-            }
-            img {
-              max-width: 90%;
-              height: auto;
-              border-radius: 16px;
-              box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
-              margin-bottom: 20px;
-            }
-            p {
-              color: rgba(255,255,255,0.6);
-              font-size: 14px;
-            }
+            body { background: #05060a; color: white; font-family: sans-serif; text-align: center; padding-top: 50px; }
+            img { max-width: 90%; border-radius: 16px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
           </style>
       </head>
       <body>
-          <img src="${imageUrl}" alt="Trader Stats for ${shortAddress}" />
+          <img src="${staticImageUrl}" alt="Trader Stats for ${shortAddress}" />
           <p>Brokex Stats for ${shortAddress}</p>
       </body>
       </html>

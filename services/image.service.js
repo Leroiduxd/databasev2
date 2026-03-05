@@ -1,8 +1,16 @@
 // services/image.service.js
+const fs = require("fs");
+const path = require("path");
 const { createCanvas } = require("@napi-rs/canvas");
 
 const WIDTH = 1200;
 const HEIGHT = 630;
+
+// Création automatique du dossier pour stocker les images
+const cardsDir = path.join(__dirname, "../public/cards");
+if (!fs.existsSync(cardsDir)) {
+  fs.mkdirSync(cardsDir, { recursive: true });
+}
 
 function shortAddr(addr) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
@@ -129,7 +137,6 @@ function generateTraderCard({ address, ranks }) {
   const cardW = Math.floor((WIDTH - 144 - gap * 2) / 3);
   const cardH = 190;
 
-  // Card 1: PnL
   drawMetricCard(ctx, {
     x: 72, y: cardY, w: cardW, h: cardH,
     title: "Realized PnL",
@@ -139,7 +146,6 @@ function generateTraderCard({ address, ranks }) {
     accent: pnlUsd === null ? "neutral" : pnlUsd >= 0 ? "pos" : "neg",
   });
 
-  // Card 2: Volume
   drawMetricCard(ctx, {
     x: 72 + cardW + gap, y: cardY, w: cardW, h: cardH,
     title: "Total Volume",
@@ -149,7 +155,6 @@ function generateTraderCard({ address, ranks }) {
     accent: "neutral",
   });
 
-  // Card 3: Trades
   drawMetricCard(ctx, {
     x: 72 + (cardW + gap) * 2, y: cardY, w: cardW, h: cardH,
     title: "Activity",
@@ -159,7 +164,6 @@ function generateTraderCard({ address, ranks }) {
     accent: "neutral",
   });
 
-  // Footer
   ctx.fillStyle = "rgba(255,255,255,0.40)";
   ctx.font = "600 14px Inter, Arial";
   ctx.fillText(`brokex.trade/${shortAddr(address)}`, 72, 540);
@@ -167,4 +171,16 @@ function generateTraderCard({ address, ranks }) {
   return canvas.toBuffer("image/png");
 }
 
-module.exports = { generateTraderCard };
+// Nouvelle fonction qui génère ET sauvegarde l'image
+function generateAndSaveTraderCard(address, ranks) {
+  try {
+    const pngBuffer = generateTraderCard({ address, ranks });
+    const fileName = `${address.toLowerCase()}.png`;
+    const filePath = path.join(cardsDir, fileName);
+    fs.writeFileSync(filePath, pngBuffer);
+  } catch (err) {
+    console.error(`[ImageService] Failed to generate card for ${address}:`, err);
+  }
+}
+
+module.exports = { generateAndSaveTraderCard };
