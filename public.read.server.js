@@ -10,6 +10,7 @@ const { stmt } = require("./db");
 const writeRoutes = require("./write.routes");
 const { generateTraderCard } = require("./services/image.service");
 const path = require("path");
+const { LRUCache } = require("lru-cache");
 
 // <-- AJOUT : Import du service des expositions
 const { getAllExposures } = require("./services/exposures"); 
@@ -44,8 +45,6 @@ function parseMarketE6(query) {
 // PUBLIC READ server
 // --------------------
 const readApp = express();
-// <-- AJOUT : On rend le dossier des images accessible publiquement !
-readApp.use("/cards", express.static(path.join(__dirname, "public/cards")));
 
 // <-- AJOUT DU MIDDLEWARE CORS POUR L'API PUBLIQUE
 readApp.use(cors()); 
@@ -343,7 +342,58 @@ readApp.get("/trader/:address/ranks", (req, res) => {
   }
 });
 
-// GET /trader/:address/share - Page HTML spéciale pour le partage sur X/Twitter/Discord
+// ============================================================================
+// --- SYSTÈME D'IMAGES DYNAMIQUE (TEST TWITTER) ---
+// ============================================================================
+
+// 1. ENDPOINT DYNAMIQUE QUI GÉNÈRE L'IMAGE (.png)
+readApp.get("/trader/:address/card.png", (req, res) => {
+  try {
+    const address = normalizeAddress(req.params.address);
+    if (!address || address.length < 10) {
+      return res.status(400).send("Invalid address");
+    }
+
+    // Vérification du Cache en mémoire
+    const cacheKey = `png:${address}`;
+    const cachedBuffer = imageCache.get(cacheKey);
+    
+    if (cachedBuffer) {
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
+      return res.status(200).send(cachedBuffer);
+    }
+
+    // Pas dans le cache : On lit la BDD ultra vite
+    const actRow = stmt.getTraderRankByActivity.get(address);
+    const volRow = stmt.getTraderRankByVolume.get(address);
+    const pnlRow = stmt.getTraderRankByPnl.get(address);
+
+    const ranks = {
+      activity: { rank: actRow?.rank, value: actRow?.tradesCount || 0 },
+      volume: { rank: volRow?.rank, value: volRow?.totalVolume || 0 },
+      pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
+    };
+
+    // On dessine avec le super design Cyberpunk
+    const pngBuffer = generateTraderCard({ address, ranks });
+
+    // On sauvegarde dans le cache pour 60 secondes
+    imageCache.set(cacheKey, pngBuffer);
+
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
+    res.setHeader("Content-Disposition", `inline; filename="brokex-${address}.png"`);
+    
+    return res.status(200).send(pngBuffer);
+  } catch (err) {
+    console.error("Image generation error:", err);
+    res.status(500).send("Failed to generate image");
+  }
+});
+
+
+// 2. ENDPOINT DE PARTAGE HTML (Avec les Meta-tags demandés)
 readApp.get("/trader/:address/share", (req, res) => {
   try {
     const address = normalizeAddress(req.params.address);
@@ -351,12 +401,9 @@ readApp.get("/trader/:address/share", (req, res) => {
       return res.status(400).send("Invalid address");
     }
 
-    const shortAddress = address.slice(0, 6) + "..." + address.slice(-4);
-
-    // On rajoute ?v=Timestamp pour forcer Twitter à charger la nouvelle image mise à jour par db.js
-    const cacheBuster = Date.now();
-    const staticImageUrl = `https://api.brokex.trade/cards/${address}.png?v=${cacheBuster}`;
-    const shareUrl = `https://api.brokex.trade/trader/${address}/share`;
+    // Le lien vers ton app et vers l'image générée à la volée
+    const shareUrl = `https://brokex.trade/trader/${address}`;
+    const imageUrl = `https://api.brokex.trade/trader/${address}/card.png`;
 
     const html = `
       <!DOCTYPE html>
@@ -364,27 +411,27 @@ readApp.get("/trader/:address/share", (req, res) => {
       <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Brokex Trader: ${shortAddress}</title>
+          <title>Brokex - Trader Stats</title>
 
-          <meta property="og:title" content="Brokex Trader Performance" />
-          <meta property="og:description" content="Check out my trading stats and rank on Brokex!" />
-          <meta property="og:image" content="${staticImageUrl}" />
-          <meta property="og:url" content="${shareUrl}" />
-          <meta property="og:type" content="website" />
-
-          <meta name="twitter:card" content="summary_large_image" />
-          <meta name="twitter:title" content="Brokex Trader Performance" />
-          <meta name="twitter:description" content="Check out my trading stats and rank on Brokex!" />
-          <meta name="twitter:image" content="${staticImageUrl}" />
+          <meta property="og:type" content="website">
+          <meta property="og:url" content="${shareUrl}">
+          <meta property="og:title" content="Brokex - Trader Stats">
+          <meta property="og:description" content="Check out my trading performance on Brokex Protocol!">
+          <meta property="og:image" content="${imageUrl}">
+          
+          <meta name="twitter:card" content="summary_large_image">
+          <meta name="twitter:title" content="Brokex - My Trading Stats">
+          <meta name="twitter:description" content="Net PnL, Volume and Ranks on-chain.">
+          <meta name="twitter:image" content="${imageUrl}">
           
           <style>
-            body { background: #05060a; color: white; font-family: sans-serif; text-align: center; padding-top: 50px; }
-            img { max-width: 90%; border-radius: 16px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+            body { background: #0B0E17; color: white; font-family: sans-serif; text-align: center; padding-top: 50px; }
+            img { max-width: 90%; border-radius: 16px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0, 229, 255, 0.2); }
           </style>
       </head>
       <body>
-          <img src="${staticImageUrl}" alt="Trader Stats for ${shortAddress}" />
-          <p>Brokex Stats for ${shortAddress}</p>
+          <img src="${imageUrl}" alt="Trader Stats" />
+          <p>Redirecting to app.brokex.trade...</p>
       </body>
       </html>
     `;
@@ -393,6 +440,7 @@ readApp.get("/trader/:address/share", (req, res) => {
     res.send(html);
 
   } catch (err) {
+    console.error(err);
     res.status(500).send("Error generating share page");
   }
 });
