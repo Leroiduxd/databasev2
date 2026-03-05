@@ -340,38 +340,58 @@ readApp.get("/trader/:address/ranks", (req, res) => {
   }
 });
 
-// GET /trader/:address/card.png - Génère la carte X/Twitter à la volée
-readApp.get("/trader/:address/card.png", (req, res) => {
+// GET /trader/:address/share - Page HTML pour les réseaux sociaux (Twitter, Discord, etc.)
+readApp.get("/trader/:address/share", (req, res) => {
   try {
     const address = normalizeAddress(req.params.address);
     if (!address || address.length < 10) {
       return res.status(400).send("Invalid address");
     }
 
-    // 1. Récupération instantanée des stats depuis SQLite
-    const actRow = stmt.getTraderRankByActivity.get(address);
-    const volRow = stmt.getTraderRankByVolume.get(address);
-    const pnlRow = stmt.getTraderRankByPnl.get(address);
-
-    const ranks = {
-      activity: { rank: actRow?.rank, value: actRow?.tradesCount || 0 },
-      volume: { rank: volRow?.rank, value: volRow?.totalVolume || 0 },
-      pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
-    };
-
-    // 2. Appel de ton nouveau service pour dessiner le Buffer PNG
-    const pngBuffer = generateTraderCard({ address, ranks });
-
-    // 3. Envoi au client sans stockage
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Content-Disposition", `inline; filename="brokex-${address}.png"`);
+    // L'URL de l'image que ton API génère
+    const imageUrl = `https://api.brokex.trade/trader/${address}/card.png`;
     
-    res.send(pngBuffer);
+    // L'URL de ton vrai site web où l'utilisateur doit atterrir quand il clique sur la carte Twitter
+    // À MODIFIER avec l'URL de ton front-end
+    const frontEndUrl = `https://brokex.trade/trader/${address}`; 
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Brokex Trader Profile</title>
+
+          <meta http-equiv="refresh" content="0; url=${frontEndUrl}" />
+
+          <meta property="og:title" content="Brokex Trader: ${address.slice(0, 6)}...${address.slice(-4)}" />
+          <meta property="og:description" content="Check out my trading stats and rank on Brokex!" />
+          <meta property="og:image" content="${imageUrl}" />
+          <meta property="og:url" content="${frontEndUrl}" />
+          <meta property="og:type" content="website" />
+
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content="Brokex Trader Performance" />
+          <meta name="twitter:description" content="Check out my trading stats and rank on Brokex!" />
+          <meta name="twitter:image" content="${imageUrl}" />
+          
+          <script>
+            // Redirection JavaScript en renfort au cas où la balise meta est ignorée
+            window.location.href = "${frontEndUrl}";
+          </script>
+      </head>
+      <body style="background-color: #05060a; color: white; font-family: sans-serif; text-align: center; padding-top: 50px;">
+          <p>Redirecting to Brokex...</p>
+      </body>
+      </html>
+    `;
+
+    res.setHeader("Content-Type", "text/html");
+    res.send(html);
 
   } catch (err) {
-    console.error("Image generation error:", err);
-    res.status(500).send("Failed to generate image");
+    res.status(500).send("Error generating share page");
   }
 });
 
