@@ -5,15 +5,14 @@
 // - Private WRITE server (127.0.0.1:3001) -> local only
 
 const express = require("express");
-const cors = require("cors"); // <-- AJOUT DE CORS ICI
+const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
+
 const { stmt } = require("./db");
 const writeRoutes = require("./write.routes");
-const { generateTraderCard } = require("./services/image.service");
-const path = require("path");
-const { LRUCache } = require("lru-cache");
-
-// <-- AJOUT : Import du service des expositions
 const { getAllExposures } = require("./services/exposures"); 
+const { generateAndSaveTraderCard } = require("./services/image.service");
 
 const PUBLIC_PORT = Number(process.env.PUBLIC_PORT || 7000);
 const PRIVATE_PORT = Number(process.env.PRIVATE_PORT || 7001);
@@ -30,7 +29,6 @@ function toInt(v, name) {
 }
 
 function parseMarketE6(query) {
-  // market can be: 69000 (human) OR 69000000000 (E6) if unit=e6
   const raw = query.market;
   if (raw === undefined) throw new Error("Missing market");
   const unit = (query.unit || "human").toString().toLowerCase();
@@ -46,14 +44,13 @@ function parseMarketE6(query) {
 // --------------------
 const readApp = express();
 
-// <-- AJOUT DU MIDDLEWARE CORS POUR L'API PUBLIQUE
+// 1. Middlewares
 readApp.use(cors()); 
+readApp.use("/output", express.static(path.join(__dirname, "output"))); // <-- Déplacé ici, APRES la création de readApp !
 
+// 2. Routes
 readApp.get("/health", (req, res) => res.json({ ok: true, mode: "public-read" }));
 
-// --- NOUVEAUX ENDPOINTS STATISTIQUES ---
-
-// 1. L'ID du plus grand trade
 readApp.get("/stats/max-trade-id", (req, res) => {
   try {
     const row = stmt.getMaxTradeId.get();
@@ -64,7 +61,6 @@ readApp.get("/stats/max-trade-id", (req, res) => {
   }
 });
 
-// 2. Le nombre total de traders uniques
 readApp.get("/stats/total-traders", (req, res) => {
   try {
     const row = stmt.getTotalTraders.get();
@@ -75,7 +71,6 @@ readApp.get("/stats/total-traders", (req, res) => {
   }
 });
 
-// 3. Les stats des trades ouverts (compte et levier moyen par actif et par sens)
 readApp.get("/stats/open-trades", (req, res) => {
   try {
     const rows = stmt.getOpenStatsPerAssetAndDirection.all();
@@ -85,15 +80,10 @@ readApp.get("/stats/open-trades", (req, res) => {
   }
 });
 
-// Volume total exécuté sur les 24 dernières heures
 readApp.get("/stats/volume-24h", (req, res) => {
   try {
-    // On calcule le timestamp d'il y a 24h pile (en secondes)
     const twentyFourHoursAgo = Math.floor(Date.now() / 1000) - 86400;
-    
-    // On passe ce timestamp à notre requête SQL
     const row = stmt.getVolume24h.get(twentyFourHoursAgo);
-    
     res.json({ 
       success: true, 
       volume24h: row && row.volume24h ? row.volume24h : 0
@@ -103,10 +93,6 @@ readApp.get("/stats/volume-24h", (req, res) => {
   }
 });
 
-// ---------------------------------------
-// --- NOUVEAUX ENDPOINTS METRIQUES (PNL, VOLUME, CLASSEMENTS) ---
-
-// Liste brute de tous les wallets uniques
 readApp.get("/traders/list", (req, res) => {
   try {
     const rows = stmt.getAllUniqueTraders.all();
@@ -117,7 +103,6 @@ readApp.get("/traders/list", (req, res) => {
   }
 });
 
-// Top Traders par nombre de trades
 readApp.get("/traders/top", (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 10, 100);
@@ -128,7 +113,6 @@ readApp.get("/traders/top", (req, res) => {
   }
 });
 
-// Top Traders avec le plus de trades ACTIFS (state = 1)
 readApp.get("/traders/top/active", (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 10, 100);
@@ -139,7 +123,6 @@ readApp.get("/traders/top/active", (req, res) => {
   }
 });
 
-// PnL et Volume total pour un trader spécifique
 readApp.get("/metrics/trader/:address", (req, res) => {
   try {
     const trader = normalizeAddress(req.params.address);
@@ -147,8 +130,6 @@ readApp.get("/metrics/trader/:address", (req, res) => {
       return res.status(400).json({ error: "Invalid address" });
     }
     const row = stmt.getTraderMetrics.get(trader);
-    
-    // Si le trader n'a pas de métriques, on renvoie 0
     res.json({ 
       success: true, 
       trader, 
@@ -162,7 +143,6 @@ readApp.get("/metrics/trader/:address", (req, res) => {
   }
 });
 
-// Top Traders classés par Volume total
 readApp.get("/metrics/top/volume", (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 10, 100);
@@ -173,7 +153,6 @@ readApp.get("/metrics/top/volume", (req, res) => {
   }
 });
 
-// Top Traders classés par PnL total (les plus rentables)
 readApp.get("/metrics/top/pnl", (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 10, 100);
@@ -184,7 +163,6 @@ readApp.get("/metrics/top/pnl", (req, res) => {
   }
 });
 
-// Top Trades individuels classés par PnL (les trades les plus gagnants)
 readApp.get("/metrics/top/trades", (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 10, 100);
@@ -194,9 +172,7 @@ readApp.get("/metrics/top/trades", (req, res) => {
     res.status(500).json({ error: "Failed to fetch top trades by PnL" });
   }
 });
-// ---------------------------------------------------------------
 
-// <-- AJOUT : NOUVEAU ENDPOINT POUR LIRE LES EXPOSITIONS
 readApp.get("/exposures", (req, res) => {
   try {
     const memory = getAllExposures();
@@ -210,7 +186,6 @@ readApp.get("/exposures", (req, res) => {
   }
 });
 
-// GET /trader/:address/ids?state=all|0|1|2|3
 readApp.get("/trader/:address/ids", (req, res) => {
   try {
     const trader = normalizeAddress(req.params.address);
@@ -234,7 +209,6 @@ readApp.get("/trader/:address/ids", (req, res) => {
   }
 });
 
-// GET /trade/:id
 readApp.get("/trade/:id", (req, res) => {
   try {
     const id = toInt(req.params.id, "id");
@@ -246,8 +220,6 @@ readApp.get("/trade/:id", (req, res) => {
   }
 });
 
-// GET /match/entry?assetId=0&market=69000[&unit=human|e6]
-// returns ids executable for state=0 (orders)
 readApp.get("/match/entry", (req, res) => {
   try {
     const assetId = toInt(req.query.assetId, "assetId");
@@ -267,8 +239,6 @@ readApp.get("/match/entry", (req, res) => {
   }
 });
 
-// GET /match/exits?assetId=0&market=69000[&unit=human|e6]
-// returns ids executable for state=1 (open positions) based on SL/TP
 readApp.get("/match/exits", (req, res) => {
   try {
     const assetId = toInt(req.query.assetId, "assetId");
@@ -292,31 +262,24 @@ readApp.get("/match/exits", (req, res) => {
   }
 });
 
-// --- LEADERBOARD COMPLET (3 LISTES TOTALEMENT DISTINCTES) ---
-// GET /traders/leaderboard
 readApp.get("/traders/leaderboard", (req, res) => {
   try {
-    const limit = 100; // Tu veux les 100 premiers de chaque
-
-    // On tire les 3 listes séparément avec juste leur stat dédiée
+    const limit = 100;
     const topByPnl = stmt.getTop100Pnl.all(limit);
     const topByVolume = stmt.getTop100Volume.all(limit);
     const topByTrades = stmt.getTop100Trades.all(limit);
 
-    // On renvoie un JSON clair et net
     res.json({ 
       success: true, 
-      topByPnl: topByPnl,       // ex: [{ trader: "0x...", pnl: 50000 }]
-      topByVolume: topByVolume, // ex: [{ trader: "0x...", volume: 1500000 }]
-      topByTrades: topByTrades  // ex: [{ trader: "0x...", totalTrades: 142 }]
+      topByPnl: topByPnl,
+      topByVolume: topByVolume,
+      topByTrades: topByTrades
     });
   } catch (e) {
     res.status(500).json({ error: "Failed to fetch leaderboards" });
   }
 });
 
-// --- RANGS ET STATS D'UN TRADER SPÉCIFIQUE ---
-// GET /trader/:address/ranks
 readApp.get("/trader/:address/ranks", (req, res) => {
   try {
     const trader = normalizeAddress(req.params.address);
@@ -342,58 +305,6 @@ readApp.get("/trader/:address/ranks", (req, res) => {
   }
 });
 
-// ============================================================================
-// --- SYSTÈME D'IMAGES DYNAMIQUE (TEST TWITTER) ---
-// ============================================================================
-
-// 1. ENDPOINT DYNAMIQUE QUI GÉNÈRE L'IMAGE (.png)
-readApp.get("/trader/:address/card.png", (req, res) => {
-  try {
-    const address = normalizeAddress(req.params.address);
-    if (!address || address.length < 10) {
-      return res.status(400).send("Invalid address");
-    }
-
-    // Vérification du Cache en mémoire
-    const cacheKey = `png:${address}`;
-    const cachedBuffer = imageCache.get(cacheKey);
-    
-    if (cachedBuffer) {
-      res.setHeader("Content-Type", "image/png");
-      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-      return res.status(200).send(cachedBuffer);
-    }
-
-    // Pas dans le cache : On lit la BDD ultra vite
-    const actRow = stmt.getTraderRankByActivity.get(address);
-    const volRow = stmt.getTraderRankByVolume.get(address);
-    const pnlRow = stmt.getTraderRankByPnl.get(address);
-
-    const ranks = {
-      activity: { rank: actRow?.rank, value: actRow?.tradesCount || 0 },
-      volume: { rank: volRow?.rank, value: volRow?.totalVolume || 0 },
-      pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
-    };
-
-    // On dessine avec le super design Cyberpunk
-    const pngBuffer = generateTraderCard({ address, ranks });
-
-    // On sauvegarde dans le cache pour 60 secondes
-    imageCache.set(cacheKey, pngBuffer);
-
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-    res.setHeader("Content-Disposition", `inline; filename="brokex-${address}.png"`);
-    
-    return res.status(200).send(pngBuffer);
-  } catch (err) {
-    console.error("Image generation error:", err);
-    res.status(500).send("Failed to generate image");
-  }
-});
-
-
-// 2. ENDPOINT DE PARTAGE HTML (Avec les Meta-tags demandés)
 readApp.get("/trader/:address/share", (req, res) => {
   try {
     const address = normalizeAddress(req.params.address);
@@ -401,9 +312,22 @@ readApp.get("/trader/:address/share", (req, res) => {
       return res.status(400).send("Invalid address");
     }
 
-    // Le lien vers ton app et vers l'image générée à la volée
-    const shareUrl = `https://brokex.trade/trader/${address}`;
-    const imageUrl = `https://api.brokex.trade/trader/${address}/card.png`;
+    const imagePath = path.join(__dirname, "output", `${address}.png`);
+    if (!fs.existsSync(imagePath)) {
+      const actRow = stmt.getTraderRankByActivity.get(address);
+      const volRow = stmt.getTraderRankByVolume.get(address);
+      const pnlRow = stmt.getTraderRankByPnl.get(address);
+      const ranks = {
+        activity: { rank: actRow?.rank, value: actRow?.tradesCount || 0 },
+        volume: { rank: volRow?.rank, value: volRow?.totalVolume || 0 },
+        pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
+      };
+      generateAndSaveTraderCard(address, ranks);
+    }
+
+    const shortAddress = address.slice(0, 6) + "..." + address.slice(-4);
+    const staticImageUrl = `https://api.brokex.trade/output/${address}.png?v=${Date.now()}`;
+    const shareUrl = `https://api.brokex.trade/trader/${address}/share`;
 
     const html = `
       <!DOCTYPE html>
@@ -417,12 +341,12 @@ readApp.get("/trader/:address/share", (req, res) => {
           <meta property="og:url" content="${shareUrl}">
           <meta property="og:title" content="Brokex - Trader Stats">
           <meta property="og:description" content="Check out my trading performance on Brokex Protocol!">
-          <meta property="og:image" content="${imageUrl}">
+          <meta property="og:image" content="${staticImageUrl}">
           
           <meta name="twitter:card" content="summary_large_image">
           <meta name="twitter:title" content="Brokex - My Trading Stats">
           <meta name="twitter:description" content="Net PnL, Volume and Ranks on-chain.">
-          <meta name="twitter:image" content="${imageUrl}">
+          <meta name="twitter:image" content="${staticImageUrl}">
           
           <style>
             body { background: #0B0E17; color: white; font-family: sans-serif; text-align: center; padding-top: 50px; }
@@ -430,7 +354,7 @@ readApp.get("/trader/:address/share", (req, res) => {
           </style>
       </head>
       <body>
-          <img src="${imageUrl}" alt="Trader Stats" />
+          <img src="${staticImageUrl}" alt="Trader Stats" />
           <p>Redirecting to app.brokex.trade...</p>
       </body>
       </html>
@@ -445,7 +369,6 @@ readApp.get("/trader/:address/share", (req, res) => {
   }
 });
 
-// Public server listens on all interfaces
 readApp.listen(PUBLIC_PORT, "0.0.0.0", () => {
   console.log(`Public READ API: http://0.0.0.0:${PUBLIC_PORT}`);
 });
@@ -455,14 +378,12 @@ readApp.listen(PUBLIC_PORT, "0.0.0.0", () => {
 // --------------------
 const writeApp = express();
 
-// <-- AJOUT DU MIDDLEWARE CORS POUR L'API PRIVÉE
 writeApp.use(cors()); 
 writeApp.use(express.json({ limit: "1mb" }));
 
 writeApp.get("/health", (req, res) => res.json({ ok: true, mode: "private-write" }));
 writeApp.use("/", writeRoutes);
 
-// Private server listens ONLY on localhost
 writeApp.listen(PRIVATE_PORT, "127.0.0.1", () => {
   console.log(`Private WRITE API (local only): http://127.0.0.1:${PRIVATE_PORT}`);
 });

@@ -1,8 +1,16 @@
 // services/image.service.js
+const fs = require("fs");
+const path = require("path");
 const { createCanvas } = require("@napi-rs/canvas");
 
 const WIDTH = 1200;
 const HEIGHT = 630;
+
+// Création du dossier "output" à la racine du projet
+const outputDir = path.join(__dirname, "../output");
+if (!fs.existsSync(outputDir)) {
+  fs.mkdirSync(outputDir, { recursive: true });
+}
 
 function shortAddr(addr) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
@@ -11,19 +19,14 @@ function shortAddr(addr) {
 function formatCompactUSD(num) {
   if (num === null || num === undefined || Number.isNaN(Number(num))) return "—";
   return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    notation: "compact",
-    maximumFractionDigits: 2,
+    style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2,
   }).format(num);
 }
 
 function formatUSD(num) {
   if (num === null || num === undefined || Number.isNaN(Number(num))) return "—";
   return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
+    style: "currency", currency: "USD", maximumFractionDigits: 2,
   }).format(num);
 }
 
@@ -50,13 +53,11 @@ function roundRect(ctx, x, y, w, h, r, fill, stroke) {
 }
 
 function drawMetricCard(ctx, { x, y, w, h, title, value, subtitleLeft, subtitleRight, accent }) {
-  // Card bg (glass effect)
   ctx.fillStyle = "rgba(255,255,255,0.03)";
   ctx.strokeStyle = "rgba(255,255,255,0.06)";
   ctx.lineWidth = 1;
   roundRect(ctx, x, y, w, h, 18, true, true);
 
-  // Accent strip
   let stripColor = "rgba(255,255,255,0.15)";
   if (accent === "pos") stripColor = "#00FF9D";
   if (accent === "neg") stripColor = "#FF3366";
@@ -64,27 +65,22 @@ function drawMetricCard(ctx, { x, y, w, h, title, value, subtitleLeft, subtitleR
   ctx.fillStyle = stripColor;
   roundRect(ctx, x, y, w, 4, { tl: 18, tr: 18, br: 0, bl: 0 }, true, false);
 
-  // Title
   ctx.fillStyle = "rgba(255,255,255,0.50)";
   ctx.font = "700 14px Inter, Arial";
   ctx.fillText(title.toUpperCase(), x + 24, y + 45);
 
-  // Value
   ctx.fillStyle = accent === "neutral" ? "#FFFFFF" : stripColor;
   ctx.font = "900 34px Inter, Arial";
   
-  // Auto-scale font if value is too long
   let displayValue = value;
   if (ctx.measureText(displayValue).width > w - 48) {
      ctx.font = "800 26px Inter, Arial";
   }
   ctx.fillText(displayValue, x + 24, y + 95);
 
-  // Separator inside card
   ctx.fillStyle = "rgba(255,255,255,0.06)";
   ctx.fillRect(x + 24, y + 130, w - 48, 1);
 
-  // Sub row
   ctx.fillStyle = "rgba(255,255,255,0.40)";
   ctx.font = "600 13px Inter, Arial";
   ctx.fillText(subtitleLeft, x + 24, y + 162);
@@ -99,24 +95,21 @@ function generateTraderCard({ address, ranks }) {
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext("2d");
 
-  // Background: Deep Dark Blue
   ctx.fillStyle = "#0B0E17";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  // Cyberpunk/DeFi Glows
   const glowLeft = ctx.createRadialGradient(0, 0, 0, 0, 0, 800);
-  glowLeft.addColorStop(0, "rgba(0, 229, 255, 0.15)"); // Cyan glow
+  glowLeft.addColorStop(0, "rgba(0, 229, 255, 0.15)"); 
   glowLeft.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = glowLeft;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
   const glowRight = ctx.createRadialGradient(WIDTH, HEIGHT, 0, WIDTH, HEIGHT, 800);
-  glowRight.addColorStop(0, "rgba(110, 56, 255, 0.15)"); // Purple glow
+  glowRight.addColorStop(0, "rgba(110, 56, 255, 0.15)"); 
   glowRight.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = glowRight;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  // Header
   ctx.fillStyle = "#FFFFFF";
   ctx.font = "900 44px Inter, Arial";
   ctx.fillText("BROKEX", 72, 105);
@@ -128,7 +121,6 @@ function generateTraderCard({ address, ranks }) {
   ctx.font = "600 20px Inter, Arial";
   ctx.fillText("ON-CHAIN PERFORMANCE", 72, 142);
 
-  // Right header tag
   ctx.fillStyle = "rgba(255,255,255,0.05)";
   ctx.strokeStyle = "rgba(255,255,255,0.1)";
   ctx.lineWidth = 1;
@@ -138,12 +130,10 @@ function generateTraderCard({ address, ranks }) {
   ctx.font = "700 16px Inter, Arial";
   ctx.fillText("Powered by Pharos", WIDTH - 255, 99);
 
-  // Address box
   ctx.fillStyle = "rgba(255,255,255,0.03)";
   ctx.strokeStyle = "rgba(255,255,255,0.08)";
   roundRect(ctx, 72, 175, WIDTH - 144, 64, 16, true, true);
 
-  // Neon dot for wallet
   ctx.fillStyle = "#00FF9D";
   ctx.beginPath();
   ctx.arc(96, 207, 6, 0, Math.PI * 2);
@@ -157,7 +147,6 @@ function generateTraderCard({ address, ranks }) {
   ctx.font = "700 22px Inter, Arial";
   ctx.fillText(address, 115, 230);
 
-  // Data extraction
   const activityRank = ranks?.activity?.rank ?? null;
   const totalTrades = ranks?.activity?.value ?? null;
   const volumeRank = ranks?.volume?.rank ?? null;
@@ -165,13 +154,11 @@ function generateTraderCard({ address, ranks }) {
   const pnlRank = ranks?.pnl?.rank ?? null;
   const pnlUsd = fromE6(ranks?.pnl?.value);
 
-  // Main cards layout
   const cardY = 270;
   const gap = 24;
   const cardW = Math.floor((WIDTH - 144 - gap * 2) / 3);
   const cardH = 190;
 
-  // Card 1: PnL
   drawMetricCard(ctx, {
     x: 72, y: cardY, w: cardW, h: cardH,
     title: "Net PnL",
@@ -181,7 +168,6 @@ function generateTraderCard({ address, ranks }) {
     accent: pnlUsd === null ? "neutral" : pnlUsd >= 0 ? "pos" : "neg",
   });
 
-  // Card 2: Volume
   drawMetricCard(ctx, {
     x: 72 + cardW + gap, y: cardY, w: cardW, h: cardH,
     title: "Volume",
@@ -191,7 +177,6 @@ function generateTraderCard({ address, ranks }) {
     accent: "neutral",
   });
 
-  // Card 3: Trades
   drawMetricCard(ctx, {
     x: 72 + (cardW + gap) * 2, y: cardY, w: cardW, h: cardH,
     title: "Activity",
@@ -201,7 +186,6 @@ function generateTraderCard({ address, ranks }) {
     accent: "neutral",
   });
 
-  // Footer
   ctx.fillStyle = "rgba(255,255,255,0.30)";
   ctx.font = "600 14px Inter, Arial";
   ctx.fillText(`app.brokex.trade`, 72, 540);
@@ -209,4 +193,17 @@ function generateTraderCard({ address, ranks }) {
   return canvas.toBuffer("image/png");
 }
 
-module.exports = { generateTraderCard };
+// Génère et sauvegarde directement dans le dossier "output"
+function generateAndSaveTraderCard(address, ranks) {
+  try {
+    const pngBuffer = generateTraderCard({ address, ranks });
+    const fileName = `${address.toLowerCase()}.png`;
+    const filePath = path.join(outputDir, fileName);
+    fs.writeFileSync(filePath, pngBuffer);
+    console.log(`[Image] Saved: output/${fileName}`);
+  } catch (err) {
+    console.error(`[ImageService] Failed to generate card for ${address}:`, err);
+  }
+}
+
+module.exports = { generateAndSaveTraderCard };

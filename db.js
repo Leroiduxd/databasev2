@@ -3,6 +3,7 @@
 // Trade IDs are PROVIDED BY YOU (no autoincrement).
 
 const Database = require("better-sqlite3");
+const { generateAndSaveTraderCard } = require("./services/image.service");
 
 const DB_PATH = process.env.DB_PATH || "trades.db";
 
@@ -11,42 +12,30 @@ const db = new Database(DB_PATH, process.env.SQL_VERBOSE === "1"
   : {}
 );
 
-const { generateAndSaveTraderCard } = require("./services/image.service");
-
 // WAL for better concurrency
 db.pragma("journal_mode = WAL");
 db.pragma("synchronous = NORMAL");
 
 function initDb() {
-  // 1. TABLE DE BASE INTACTE
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades (
-      id INTEGER PRIMARY KEY,           -- <-- YOU provide the trade id
-
-      trader TEXT NOT NULL,             -- lowercase 0x...
-      assetId INTEGER NOT NULL,         -- uint32
-
-      isLong INTEGER NOT NULL,          -- 0/1
-      isLimit INTEGER NOT NULL DEFAULT 0, -- 0=stop entry, 1=limit entry
-
-      leverage INTEGER,                -- uint8
-
-      openPrice INTEGER,               -- E6
-      state INTEGER,                   -- 0=Order,1=Open,2=Closed,3=Cancelled
-      openTimestamp INTEGER,           -- uint32
-
-      fundingIndex TEXT,               -- uint128 decimal string
-
-      closePrice INTEGER,              -- E6
-
-      lotSize INTEGER,                 -- int32
-      closedLotSize INTEGER NOT NULL DEFAULT 0, -- int32 (partial close tracking)
-
-      stopLoss INTEGER NOT NULL DEFAULT 0,     -- E6, 0 = ignore
-      takeProfit INTEGER NOT NULL DEFAULT 0,   -- E6, 0 = ignore
-
-      lpLockedCapital TEXT,            -- uint64 decimal string
-      marginUsdc TEXT                  -- uint64 decimal string
+      id INTEGER PRIMARY KEY,
+      trader TEXT NOT NULL,
+      assetId INTEGER NOT NULL,
+      isLong INTEGER NOT NULL,
+      isLimit INTEGER NOT NULL DEFAULT 0,
+      leverage INTEGER,
+      openPrice INTEGER,
+      state INTEGER,
+      openTimestamp INTEGER,
+      fundingIndex TEXT,
+      closePrice INTEGER,
+      lotSize INTEGER,
+      closedLotSize INTEGER NOT NULL DEFAULT 0,
+      stopLoss INTEGER NOT NULL DEFAULT 0,
+      takeProfit INTEGER NOT NULL DEFAULT 0,
+      lpLockedCapital TEXT,
+      marginUsdc TEXT
     );
   `);
 
@@ -56,24 +45,18 @@ function initDb() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sl_fast ON trades(assetId, state, isLong, stopLoss);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tp_fast ON trades(assetId, state, isLong, takeProfit);`);
 
-  // ------------------------------------------------------------------
-  // 2. NOUVELLE TABLE DES MÉTRIQUES (Stockage "en dur")
-  // ------------------------------------------------------------------
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades_metrics (
       id INTEGER PRIMARY KEY,           
       trader TEXT NOT NULL,
-      volume INTEGER,                   -- Calculé pour state 1 et 2
-      pnl INTEGER                       -- Calculé uniquement pour state 2
+      volume INTEGER,
+      pnl INTEGER
     );
   `);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_metrics_trader ON trades_metrics(trader);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_metrics_pnl ON trades_metrics(pnl);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_metrics_vol ON trades_metrics(volume);`);
 
-  // ------------------------------------------------------------------
-  // 3. TRIGGERS (Corrigés pour éviter le bug UNIQUE constraint failed)
-  // ------------------------------------------------------------------
   db.exec(`DROP TRIGGER IF EXISTS trg_metrics_insert;`);
   db.exec(`DROP TRIGGER IF EXISTS trg_metrics_update;`);
 
@@ -85,16 +68,12 @@ function initDb() {
       INSERT INTO trades_metrics (id, trader, volume, pnl)
       VALUES (
         new.id, new.trader,
-        -- VOLUME
         CAST(new.openPrice * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER),
-        -- PNL (Seulement si state = 2)
         CASE WHEN new.state = 2 THEN 
           CAST((CASE WHEN new.isLong = 1 THEN (new.closePrice - new.openPrice) ELSE (new.openPrice - new.closePrice) END) * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER)
         ELSE NULL END
       )
-      ON CONFLICT(id) DO UPDATE SET
-        volume = excluded.volume,
-        pnl = excluded.pnl;
+      ON CONFLICT(id) DO UPDATE SET volume = excluded.volume, pnl = excluded.pnl;
     END;
   `);
 
@@ -106,20 +85,15 @@ function initDb() {
       INSERT INTO trades_metrics (id, trader, volume, pnl)
       VALUES (
         new.id, new.trader,
-        -- VOLUME
         CAST(new.openPrice * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER),
-        -- PNL (Seulement si state = 2)
         CASE WHEN new.state = 2 THEN 
           CAST((CASE WHEN new.isLong = 1 THEN (new.closePrice - new.openPrice) ELSE (new.openPrice - new.closePrice) END) * new.lotSize * (CASE new.assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) AS INTEGER)
         ELSE NULL END
       )
-      ON CONFLICT(id) DO UPDATE SET
-        volume = excluded.volume,
-        pnl = excluded.pnl;
+      ON CONFLICT(id) DO UPDATE SET volume = excluded.volume, pnl = excluded.pnl;
     END;
   `);
 
-  // 4. RATTRAPAGE DES ANCIENS TRADES (Corrigé avec UPSERT)
   db.exec(`
     INSERT INTO trades_metrics (id, trader, volume, pnl)
     SELECT id, trader,
@@ -129,62 +103,26 @@ function initDb() {
       ELSE NULL END
     FROM trades
     WHERE state IN (1, 2)
-    ON CONFLICT(id) DO UPDATE SET
-      volume = excluded.volume,
-      pnl = excluded.pnl;
+    ON CONFLICT(id) DO UPDATE SET volume = excluded.volume, pnl = excluded.pnl;
   `);
 }
 
 initDb();
 
-// --------------------
-// READ statements
-// --------------------
 const stmt = {
-
   getTradeById: db.prepare(`SELECT * FROM trades WHERE id = ?;`),
-
   getMaxTradeId: db.prepare(`SELECT MAX(id) as maxId FROM trades;`),
-  
   getTotalTraders: db.prepare(`SELECT COUNT(DISTINCT trader) as totalTraders FROM trades;`),
   
   getOpenStatsPerAssetAndDirection: db.prepare(`
     SELECT assetId, isLong, COUNT(*) as openCount, AVG(leverage) as avgLeverage
-    FROM trades
-    WHERE state = 1
-    GROUP BY assetId, isLong;
+    FROM trades WHERE state = 1 GROUP BY assetId, isLong;
   `),
-  // --- LES 3 REQUÊTES STRICTEMENT SÉPARÉES ---
   
-  // 1. Juste les 100 premiers par PNL (avec juste leur PNL)
-  getTop100Pnl: db.prepare(`
-    SELECT trader, SUM(pnl) as pnl
-    FROM trades_metrics
-    WHERE pnl IS NOT NULL
-    GROUP BY trader
-    ORDER BY pnl DESC
-    LIMIT ?;
-  `),
+  getTop100Pnl: db.prepare(`SELECT trader, SUM(pnl) as pnl FROM trades_metrics WHERE pnl IS NOT NULL GROUP BY trader ORDER BY pnl DESC LIMIT ?;`),
+  getTop100Volume: db.prepare(`SELECT trader, SUM(volume) as volume FROM trades_metrics GROUP BY trader ORDER BY volume DESC LIMIT ?;`),
+  getTop100Trades: db.prepare(`SELECT trader, COUNT(id) as totalTrades FROM trades GROUP BY trader ORDER BY totalTrades DESC LIMIT ?;`),
 
-  // 2. Juste les 100 premiers par Volume (avec juste leur Volume)
-  getTop100Volume: db.prepare(`
-    SELECT trader, SUM(volume) as volume
-    FROM trades_metrics
-    GROUP BY trader
-    ORDER BY volume DESC
-    LIMIT ?;
-  `),
-
-  // 3. Juste les 100 premiers par Nombre de trades (avec juste leur nombre)
-  getTop100Trades: db.prepare(`
-    SELECT trader, COUNT(id) as totalTrades
-    FROM trades
-    GROUP BY trader
-    ORDER BY totalTrades DESC
-    LIMIT ?;
-  `),
-
-  // --- RANGS D'UN TRADER SPÉCIFIQUE ---
   getTraderRankByActivity: db.prepare(`
     WITH Ranked AS (SELECT trader, COUNT(*) as tradesCount, RANK() OVER (ORDER BY COUNT(*) DESC) as rank FROM trades GROUP BY trader)
     SELECT rank, tradesCount FROM Ranked WHERE trader = ?;
@@ -198,167 +136,51 @@ const stmt = {
     SELECT rank, totalPnl FROM Ranked WHERE trader = ?;
   `),
 
-  // --- STATS BASIQUES DES TRADERS ---
-  getTopTradersAll: db.prepare(`
-    SELECT trader, COUNT(*) as count 
-    FROM trades 
-    GROUP BY trader 
-    ORDER BY count DESC 
-    LIMIT ?;
-  `),
+  getTopTradersAll: db.prepare(`SELECT trader, COUNT(*) as count FROM trades GROUP BY trader ORDER BY count DESC LIMIT ?;`),
+  getTopTradersByState: db.prepare(`SELECT trader, COUNT(*) as count FROM trades WHERE state = ? GROUP BY trader ORDER BY count DESC LIMIT ?;`),
+  getAllUniqueTraders: db.prepare(`SELECT DISTINCT trader FROM trades;`),
 
-  getTopTradersByState: db.prepare(`
-    SELECT trader, COUNT(*) as count 
-    FROM trades 
-    WHERE state = ? 
-    GROUP BY trader 
-    ORDER BY count DESC 
-    LIMIT ?;
-  `),
+  getTraderMetrics: db.prepare(`SELECT trader, SUM(pnl) as totalPnl, SUM(volume) as totalVolume FROM trades_metrics WHERE trader = ?;`),
+  getTopTradersByVolume: db.prepare(`SELECT trader, SUM(volume) as totalVolume FROM trades_metrics GROUP BY trader ORDER BY totalVolume DESC LIMIT ?;`),
+  getTopTradersByPnl: db.prepare(`SELECT trader, SUM(pnl) as totalPnl FROM trades_metrics WHERE pnl IS NOT NULL GROUP BY trader ORDER BY totalPnl DESC LIMIT ?;`),
+  getTopTradesByPnl: db.prepare(`SELECT t.*, m.pnl, m.volume FROM trades_metrics m JOIN trades t ON t.id = m.id WHERE m.pnl IS NOT NULL ORDER BY m.pnl DESC LIMIT ?;`),
 
-  getAllUniqueTraders: db.prepare(`
-    SELECT DISTINCT trader 
-    FROM trades;
-  `),
-
-  // --- REQUÊTES PNL ET VOLUME ---
-  
-  getTraderMetrics: db.prepare(`
-    SELECT trader, SUM(pnl) as totalPnl, SUM(volume) as totalVolume
-    FROM trades_metrics
-    WHERE trader = ?;
-  `),
-
-  getTopTradersByVolume: db.prepare(`
-    SELECT trader, SUM(volume) as totalVolume
-    FROM trades_metrics
-    GROUP BY trader
-    ORDER BY totalVolume DESC
-    LIMIT ?;
-  `),
-
-  getTopTradersByPnl: db.prepare(`
-    SELECT trader, SUM(pnl) as totalPnl
-    FROM trades_metrics
-    WHERE pnl IS NOT NULL
-    GROUP BY trader
-    ORDER BY totalPnl DESC
-    LIMIT ?;
-  `),
-
-  getTopTradesByPnl: db.prepare(`
-    SELECT t.*, m.pnl, m.volume 
-    FROM trades_metrics m
-    JOIN trades t ON t.id = m.id
-    WHERE m.pnl IS NOT NULL
-    ORDER BY m.pnl DESC
-    LIMIT ?;
-  `),
-  // --------------------------------------------------------------------------------
-
-  getTraderIdsAll: db.prepare(`
-    SELECT id FROM trades
-    WHERE trader = ?
-    ORDER BY id DESC;
-  `),
-
-  getTraderIdsByState: db.prepare(`
-    SELECT id FROM trades
-    WHERE trader = ? AND state = ?
-    ORDER BY id DESC;
-  `),
+  getTraderIdsAll: db.prepare(`SELECT id FROM trades WHERE trader = ? ORDER BY id DESC;`),
+  getTraderIdsByState: db.prepare(`SELECT id FROM trades WHERE trader = ? AND state = ? ORDER BY id DESC;`),
 
   matchEntry: db.prepare(`
-    SELECT id,
-           CASE WHEN isLimit = 1 THEN 'limit' ELSE 'stop' END AS kind
+    SELECT id, CASE WHEN isLimit = 1 THEN 'limit' ELSE 'stop' END AS kind
     FROM trades
-    WHERE assetId = ?
-      AND state = 0
-      AND (
-        (isLimit = 1 AND (
-            (isLong = 1 AND ? <= openPrice) OR
-            (isLong = 0 AND ? >= openPrice)
-        ))
-        OR
-        (isLimit = 0 AND (
-            (isLong = 1 AND ? >= openPrice) OR
-            (isLong = 0 AND ? <= openPrice)
-        ))
-      );
+    WHERE assetId = ? AND state = 0
+      AND ((isLimit = 1 AND ((isLong = 1 AND ? <= openPrice) OR (isLong = 0 AND ? >= openPrice)))
+        OR (isLimit = 0 AND ((isLong = 1 AND ? >= openPrice) OR (isLong = 0 AND ? <= openPrice))));
   `),
 
   matchExits: db.prepare(`
     SELECT id,
-           CASE
-             WHEN stopLoss != 0 AND (
-               (isLong = 1 AND ? <= stopLoss) OR
-               (isLong = 0 AND ? >= stopLoss)
-             ) THEN 'stopLoss'
-             WHEN takeProfit != 0 AND (
-               (isLong = 1 AND ? >= takeProfit) OR
-               (isLong = 0 AND ? <= takeProfit)
-             ) THEN 'takeProfit'
-             ELSE NULL
-           END AS kind
+      CASE WHEN stopLoss != 0 AND ((isLong = 1 AND ? <= stopLoss) OR (isLong = 0 AND ? >= stopLoss)) THEN 'stopLoss'
+           WHEN takeProfit != 0 AND ((isLong = 1 AND ? >= takeProfit) OR (isLong = 0 AND ? <= takeProfit)) THEN 'takeProfit'
+           ELSE NULL END AS kind
     FROM trades
-    WHERE assetId = ?
-      AND state = 1
-      AND (
-        (stopLoss != 0 AND (
-          (isLong = 1 AND ? <= stopLoss) OR
-          (isLong = 0 AND ? >= stopLoss)
-        ))
-        OR
-        (takeProfit != 0 AND (
-          (isLong = 1 AND ? >= takeProfit) OR
-          (isLong = 0 AND ? <= takeProfit)
-        ))
-      );
+    WHERE assetId = ? AND state = 1
+      AND ((stopLoss != 0 AND ((isLong = 1 AND ? <= stopLoss) OR (isLong = 0 AND ? >= stopLoss)))
+        OR (takeProfit != 0 AND ((isLong = 1 AND ? >= takeProfit) OR (isLong = 0 AND ? <= takeProfit))));
   `),
 
-  getVolume24h: db.prepare(`
-    SELECT SUM(m.volume) as volume24h
-    FROM trades_metrics m
-    JOIN trades t ON t.id = m.id
-    WHERE t.state IN (1, 2) 
-      AND t.openTimestamp >= ?;
-  `),
-  
+  getVolume24h: db.prepare(`SELECT SUM(m.volume) as volume24h FROM trades_metrics m JOIN trades t ON t.id = m.id WHERE t.state IN (1, 2) AND t.openTimestamp >= ?;`),
 };
 
 // --------------------
 // WRITE statements
 // --------------------
-
 const upsertTradeSql = `
   INSERT INTO trades (
-    id, trader, assetId, isLong, isLimit, leverage,
-    openPrice, state, openTimestamp, fundingIndex,
-    closePrice, lotSize, closedLotSize, stopLoss, takeProfit,
-    lpLockedCapital, marginUsdc
+    id, trader, assetId, isLong, isLimit, leverage, openPrice, state, openTimestamp, fundingIndex, closePrice, lotSize, closedLotSize, stopLoss, takeProfit, lpLockedCapital, marginUsdc
   ) VALUES (
-    @id, @trader, @assetId, @isLong, @isLimit, @leverage,
-    @openPrice, @state, @openTimestamp, @fundingIndex,
-    @closePrice, @lotSize, @closedLotSize, @stopLoss, @takeProfit,
-    @lpLockedCapital, @marginUsdc
+    @id, @trader, @assetId, @isLong, @isLimit, @leverage, @openPrice, @state, @openTimestamp, @fundingIndex, @closePrice, @lotSize, @closedLotSize, @stopLoss, @takeProfit, @lpLockedCapital, @marginUsdc
   )
   ON CONFLICT(id) DO UPDATE SET
-    trader=excluded.trader,
-    assetId=excluded.assetId,
-    isLong=excluded.isLong,
-    isLimit=excluded.isLimit,
-    leverage=excluded.leverage,
-    openPrice=excluded.openPrice,
-    state=excluded.state,
-    openTimestamp=excluded.openTimestamp,
-    fundingIndex=excluded.fundingIndex,
-    closePrice=excluded.closePrice,
-    lotSize=excluded.lotSize,
-    closedLotSize=excluded.closedLotSize,
-    stopLoss=excluded.stopLoss,
-    takeProfit=excluded.takeProfit,
-    lpLockedCapital=excluded.lpLockedCapital,
-    marginUsdc=excluded.marginUsdc;
+    trader=excluded.trader, assetId=excluded.assetId, isLong=excluded.isLong, isLimit=excluded.isLimit, leverage=excluded.leverage, openPrice=excluded.openPrice, state=excluded.state, openTimestamp=excluded.openTimestamp, fundingIndex=excluded.fundingIndex, closePrice=excluded.closePrice, lotSize=excluded.lotSize, closedLotSize=excluded.closedLotSize, stopLoss=excluded.stopLoss, takeProfit=excluded.takeProfit, lpLockedCapital=excluded.lpLockedCapital, marginUsdc=excluded.marginUsdc;
 `;
 
 stmt.upsertTrade = db.prepare(upsertTradeSql);
@@ -366,7 +188,6 @@ stmt.patchTrade = db.prepare(`UPDATE trades SET state = COALESCE(@state, state),
 stmt.patchState = db.prepare(`UPDATE trades SET state = COALESCE(@state, state), closePrice = COALESCE(@closePrice, closePrice), closedLotSize = COALESCE(@closedLotSize, closedLotSize), fundingIndex = COALESCE(@fundingIndex, fundingIndex) WHERE id = @id`);
 stmt.patchSLTP = db.prepare(`UPDATE trades SET stopLoss = COALESCE(@stopLoss, stopLoss), takeProfit = COALESCE(@takeProfit, takeProfit) WHERE id = @id`);
 
-// <-- AJOUT : Fonction asynchrone pour mettre à jour l'image sans bloquer la DB
 function triggerCardUpdate(trader) {
   if (!trader) return;
   setImmediate(() => {
@@ -381,7 +202,6 @@ function triggerCardUpdate(trader) {
         pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
       };
       
-      // Crée et remplace physiquement l'image sur le serveur !
       generateAndSaveTraderCard(trader, ranks);
     } catch (e) {
       console.error("[db.js] Error updating card for", trader, e);
@@ -393,7 +213,7 @@ const tx = {
   upsertTrade: db.transaction((payload) => {
     stmt.upsertTrade.run(payload);
     const t = stmt.getTradeById.get(payload.id);
-    if (t) triggerCardUpdate(t.trader); // <-- Met à jour l'image !
+    if (t) triggerCardUpdate(t.trader);
     return t;
   }),
 
@@ -401,13 +221,13 @@ const tx = {
     const info = stmt.patchTrade.run(payload);
     if (info.changes === 0) return null;
     const t = stmt.getTradeById.get(payload.id);
-    if (t) triggerCardUpdate(t.trader); // <-- Met à jour l'image !
+    if (t) triggerCardUpdate(t.trader);
     return t;
   }),
 
   batchPatchStates: db.transaction((patches) => {
     let updated = 0;
-    const tradersToUpdate = new Set(); // Pour ne pas générer 10 fois l'image du même mec dans un batch
+    const tradersToUpdate = new Set();
     
     for (const p of patches) {
       const info = stmt.patchState.run(p);
@@ -417,8 +237,7 @@ const tx = {
         if (t) tradersToUpdate.add(t.trader);
       }
     }
-    
-    tradersToUpdate.forEach(triggerCardUpdate); // <-- Met à jour les images !
+    tradersToUpdate.forEach(triggerCardUpdate);
     return updated;
   }),
 
@@ -434,8 +253,7 @@ const tx = {
         if (t) tradersToUpdate.add(t.trader);
       }
     }
-    
-    tradersToUpdate.forEach(triggerCardUpdate); // <-- Met à jour les images !
+    tradersToUpdate.forEach(triggerCardUpdate);
     return updated;
   })
 };
