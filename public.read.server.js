@@ -93,6 +93,42 @@ readApp.get("/trades/open/:assetId", (req, res) => {
   }
 });
 
+// GET /trades/orders/:assetId
+// Récupère toutes les infos des ordres en attente (state = 0) pour un actif précis
+readApp.get("/trades/orders/:assetId", (req, res) => {
+  try {
+    const assetId = toInt(req.params.assetId, "assetId");
+    const rows = stmt.getOrdersByAssetId.all(assetId);
+    
+    res.json({
+      success: true,
+      assetId: assetId,
+      count: rows.length,
+      data: rows
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message || "Failed to fetch orders for this asset" });
+  }
+});
+
+// GET /trades/closed/:assetId
+// Récupère toutes les infos des trades fermés (state = 2) pour un actif précis
+readApp.get("/trades/closed/:assetId", (req, res) => {
+  try {
+    const assetId = toInt(req.params.assetId, "assetId");
+    const rows = stmt.getClosedTradesByAssetId.all(assetId);
+    
+    res.json({
+      success: true,
+      assetId: assetId,
+      count: rows.length,
+      data: rows
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message || "Failed to fetch closed trades for this asset" });
+  }
+});
+
 readApp.get("/stats/open-trades", (req, res) => {
   try {
     const rows = stmt.getOpenStatsPerAssetAndDirection.all();

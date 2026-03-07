@@ -141,6 +141,17 @@ const stmt = {
     WHERE state = 1 AND assetId = ?;
   `),
 
+  getOrdersByAssetId: db.prepare(`
+    SELECT * FROM trades 
+    WHERE state = 0 AND assetId = ?;
+  `),
+
+  // --- TRADES FERMÉS (STATE 2) PAR ACTIF ---
+  getClosedTradesByAssetId: db.prepare(`
+    SELECT * FROM trades 
+    WHERE state = 2 AND assetId = ?;
+  `),
+
   getTopTradersAll: db.prepare(`SELECT trader, COUNT(*) as count FROM trades GROUP BY trader ORDER BY count DESC LIMIT ?;`),
   getTopTradersByState: db.prepare(`SELECT trader, COUNT(*) as count FROM trades WHERE state = ? GROUP BY trader ORDER BY count DESC LIMIT ?;`),
   getAllUniqueTraders: db.prepare(`SELECT DISTINCT trader FROM trades;`),
