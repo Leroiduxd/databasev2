@@ -135,6 +135,11 @@ const stmt = {
     WITH Ranked AS (SELECT trader, SUM(pnl) as totalPnl, RANK() OVER (ORDER BY COALESCE(SUM(pnl), 0) DESC) as rank FROM trades_metrics WHERE pnl IS NOT NULL GROUP BY trader)
     SELECT rank, totalPnl FROM Ranked WHERE trader = ?;
   `),
+  // --- TRADES OUVERTS PAR ACTIF ---
+  getOpenTradesByAssetId: db.prepare(`
+    SELECT * FROM trades 
+    WHERE state = 1 AND assetId = ?;
+  `),
 
   getTopTradersAll: db.prepare(`SELECT trader, COUNT(*) as count FROM trades GROUP BY trader ORDER BY count DESC LIMIT ?;`),
   getTopTradersByState: db.prepare(`SELECT trader, COUNT(*) as count FROM trades WHERE state = ? GROUP BY trader ORDER BY count DESC LIMIT ?;`),

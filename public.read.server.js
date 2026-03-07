@@ -71,6 +71,28 @@ readApp.get("/stats/total-traders", (req, res) => {
   }
 });
 
+// GET /trades/open/:assetId
+// Récupère toutes les infos des trades actuellement ouverts (state = 1) pour un actif précis
+readApp.get("/trades/open/:assetId", (req, res) => {
+  try {
+    // On sécurise l'input pour être sûr que c'est bien un nombre
+    const assetId = toInt(req.params.assetId, "assetId");
+    
+    // On exécute la requête SQL
+    const rows = stmt.getOpenTradesByAssetId.all(assetId);
+    
+    // On renvoie un JSON propre avec le compte et toutes les données
+    res.json({
+      success: true,
+      assetId: assetId,
+      count: rows.length,
+      data: rows
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message || "Failed to fetch open trades for this asset" });
+  }
+});
+
 readApp.get("/stats/open-trades", (req, res) => {
   try {
     const rows = stmt.getOpenStatsPerAssetAndDirection.all();
