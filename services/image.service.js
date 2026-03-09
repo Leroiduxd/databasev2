@@ -1,16 +1,8 @@
 // services/image.service.js
-const fs = require("fs");
-const path = require("path");
 const { createCanvas } = require("@napi-rs/canvas");
 
 const WIDTH = 1200;
 const HEIGHT = 630;
-
-// Création du dossier "output" à la racine du projet
-const outputDir = path.join(__dirname, "../output");
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
 
 function shortAddr(addr) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
@@ -193,17 +185,4 @@ function generateTraderCard({ address, ranks }) {
   return canvas.toBuffer("image/png");
 }
 
-// Génère et sauvegarde directement dans le dossier "output"
-function generateAndSaveTraderCard(address, ranks) {
-  try {
-    const pngBuffer = generateTraderCard({ address, ranks });
-    const fileName = `${address.toLowerCase()}.png`;
-    const filePath = path.join(outputDir, fileName);
-    fs.writeFileSync(filePath, pngBuffer);
-    console.log(`[Image] Saved: output/${fileName}`);
-  } catch (err) {
-    console.error(`[ImageService] Failed to generate card for ${address}:`, err);
-  }
-}
-
-module.exports = { generateAndSaveTraderCard };
+module.exports = { generateTraderCard };

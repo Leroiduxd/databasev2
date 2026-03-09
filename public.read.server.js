@@ -12,7 +12,7 @@ const fs = require("fs");
 const { stmt } = require("./db");
 const writeRoutes = require("./write.routes");
 const { getAllExposures } = require("./services/exposures"); 
-const { generateAndSaveTraderCard } = require("./services/image.service");
+const { generateTraderCard } = require("./services/image.service");
 
 const PUBLIC_PORT = Number(process.env.PUBLIC_PORT || 7000);
 const PRIVATE_PORT = Number(process.env.PRIVATE_PORT || 7001);
@@ -363,67 +363,32 @@ readApp.get("/trader/:address/ranks", (req, res) => {
   }
 });
 
-readApp.get("/trader/:address/share", (req, res) => {
+// GET /trader/:address/card.png - ZÉRO STOCKAGE, généré à la volée !
+readApp.get("/trader/:address/card.png", (req, res) => {
   try {
     const address = normalizeAddress(req.params.address);
-    if (!address || address.length < 10) {
-      return res.status(400).send("Invalid address");
-    }
+    if (!address || address.length < 10) return res.status(400).send("Invalid");
 
-    const imagePath = path.join(__dirname, "output", `${address}.png`);
-    if (!fs.existsSync(imagePath)) {
-      const actRow = stmt.getTraderRankByActivity.get(address);
-      const volRow = stmt.getTraderRankByVolume.get(address);
-      const pnlRow = stmt.getTraderRankByPnl.get(address);
-      const ranks = {
-        activity: { rank: actRow?.rank, value: actRow?.tradesCount || 0 },
-        volume: { rank: volRow?.rank, value: volRow?.totalVolume || 0 },
-        pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
-      };
-      generateAndSaveTraderCard(address, ranks);
-    }
+    // 1. On lit les stats direct dans SQLite
+    const actRow = stmt.getTraderRankByActivity.get(address);
+    const volRow = stmt.getTraderRankByVolume.get(address);
+    const pnlRow = stmt.getTraderRankByPnl.get(address);
+    
+    const ranks = {
+      activity: { rank: actRow?.rank, value: actRow?.tradesCount || 0 },
+      volume: { rank: volRow?.rank, value: volRow?.totalVolume || 0 },
+      pnl: { rank: pnlRow?.rank, value: pnlRow?.totalPnl || 0 }
+    };
 
-    const shortAddress = address.slice(0, 6) + "..." + address.slice(-4);
-    const staticImageUrl = `https://api.brokex.trade/output/${address}.png?v=${Date.now()}`;
-    const shareUrl = `https://api.brokex.trade/trader/${address}/share`;
+    // 2. On génère l'image (ça retourne juste un Buffer en mémoire)
+    const pngBuffer = generateTraderCard({ address, ranks });
 
-    const html = `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Brokex - Trader Stats</title>
-
-          <meta property="og:type" content="website">
-          <meta property="og:url" content="${shareUrl}">
-          <meta property="og:title" content="Brokex - Trader Stats">
-          <meta property="og:description" content="Check out my trading performance on Brokex Protocol!">
-          <meta property="og:image" content="${staticImageUrl}">
-          
-          <meta name="twitter:card" content="summary_large_image">
-          <meta name="twitter:title" content="Brokex - My Trading Stats">
-          <meta name="twitter:description" content="Net PnL, Volume and Ranks on-chain.">
-          <meta name="twitter:image" content="${staticImageUrl}">
-          
-          <style>
-            body { background: #0B0E17; color: white; font-family: sans-serif; text-align: center; padding-top: 50px; }
-            img { max-width: 90%; border-radius: 16px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0, 229, 255, 0.2); }
-          </style>
-      </head>
-      <body>
-          <img src="${staticImageUrl}" alt="Trader Stats" />
-          <p>Redirecting to app.brokex.trade...</p>
-      </body>
-      </html>
-    `;
-
-    res.setHeader("Content-Type", "text/html");
-    res.send(html);
+    // 3. On envoie l'image au navigateur direct
+    res.setHeader("Content-Type", "image/png");
+    res.send(pngBuffer);
 
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Error generating share page");
+    res.status(500).send("Error");
   }
 });
 

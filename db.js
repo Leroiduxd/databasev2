@@ -3,7 +3,6 @@
 // Trade IDs are PROVIDED BY YOU (no autoincrement).
 
 const Database = require("better-sqlite3");
-const { generateAndSaveTraderCard } = require("./services/image.service");
 
 const DB_PATH = process.env.DB_PATH || "trades.db";
 
@@ -228,48 +227,30 @@ function triggerCardUpdate(trader) {
 const tx = {
   upsertTrade: db.transaction((payload) => {
     stmt.upsertTrade.run(payload);
-    const t = stmt.getTradeById.get(payload.id);
-    if (t) triggerCardUpdate(t.trader);
-    return t;
+    return stmt.getTradeById.get(payload.id);
   }),
 
   patchTrade: db.transaction((payload) => {
     const info = stmt.patchTrade.run(payload);
     if (info.changes === 0) return null;
-    const t = stmt.getTradeById.get(payload.id);
-    if (t) triggerCardUpdate(t.trader);
-    return t;
+    return stmt.getTradeById.get(payload.id);
   }),
 
   batchPatchStates: db.transaction((patches) => {
     let updated = 0;
-    const tradersToUpdate = new Set();
-    
     for (const p of patches) {
       const info = stmt.patchState.run(p);
-      if (info.changes) {
-        updated += 1;
-        const t = stmt.getTradeById.get(p.id);
-        if (t) tradersToUpdate.add(t.trader);
-      }
+      if (info.changes) updated += 1;
     }
-    tradersToUpdate.forEach(triggerCardUpdate);
     return updated;
   }),
 
   batchPatchSLTP: db.transaction((patches) => {
     let updated = 0;
-    const tradersToUpdate = new Set();
-    
     for (const p of patches) {
       const info = stmt.patchSLTP.run(p);
-      if (info.changes) {
-        updated += 1;
-        const t = stmt.getTradeById.get(p.id);
-        if (t) tradersToUpdate.add(t.trader);
-      }
+      if (info.changes) updated += 1;
     }
-    tradersToUpdate.forEach(triggerCardUpdate);
     return updated;
   })
 };
