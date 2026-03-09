@@ -58,15 +58,15 @@ function drawMetricCard(ctx, { x, y, w, h, title, value, subtitleLeft, subtitleR
   roundRect(ctx, x, y, w, 4, { tl: 18, tr: 18, br: 0, bl: 0 }, true, false);
 
   ctx.fillStyle = "rgba(255,255,255,0.50)";
-  ctx.font = "700 14px Inter, Arial";
+  ctx.font = "bold 14px sans-serif";
   ctx.fillText(title.toUpperCase(), x + 24, y + 45);
 
   ctx.fillStyle = accent === "neutral" ? "#FFFFFF" : stripColor;
-  ctx.font = "900 34px Inter, Arial";
+  ctx.font = "bold 34px sans-serif";
   
   let displayValue = value;
   if (ctx.measureText(displayValue).width > w - 48) {
-     ctx.font = "800 26px Inter, Arial";
+     ctx.font = "bold 26px sans-serif";
   }
   ctx.fillText(displayValue, x + 24, y + 95);
 
@@ -74,11 +74,11 @@ function drawMetricCard(ctx, { x, y, w, h, title, value, subtitleLeft, subtitleR
   ctx.fillRect(x + 24, y + 130, w - 48, 1);
 
   ctx.fillStyle = "rgba(255,255,255,0.40)";
-  ctx.font = "600 13px Inter, Arial";
+  ctx.font = "bold 13px sans-serif";
   ctx.fillText(subtitleLeft, x + 24, y + 162);
 
   ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.font = "800 14px Inter, Arial";
+  ctx.font = "bold 14px sans-serif";
   const textW = ctx.measureText(subtitleRight).width;
   ctx.fillText(subtitleRight, x + w - 24 - textW, y + 162);
 }
@@ -103,14 +103,14 @@ function generateTraderCard({ address, ranks }) {
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
   ctx.fillStyle = "#FFFFFF";
-  ctx.font = "900 44px Inter, Arial";
+  ctx.font = "bold 44px sans-serif";
   ctx.fillText("BROKEX", 72, 105);
 
   ctx.fillStyle = "#00E5FF";
   ctx.fillText("PROTOCOL", 72 + ctx.measureText("BROKEX ").width, 105);
 
   ctx.fillStyle = "rgba(255,255,255,0.50)";
-  ctx.font = "600 20px Inter, Arial";
+  ctx.font = "bold 20px sans-serif";
   ctx.fillText("ON-CHAIN PERFORMANCE", 72, 142);
 
   ctx.fillStyle = "rgba(255,255,255,0.05)";
@@ -119,7 +119,7 @@ function generateTraderCard({ address, ranks }) {
   roundRect(ctx, WIDTH - 280, 70, 208, 44, 14, true, true);
 
   ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.font = "700 16px Inter, Arial";
+  ctx.font = "bold 16px sans-serif";
   ctx.fillText("Powered by Pharos", WIDTH - 255, 99);
 
   ctx.fillStyle = "rgba(255,255,255,0.03)";
@@ -132,11 +132,11 @@ function generateTraderCard({ address, ranks }) {
   ctx.fill();
 
   ctx.fillStyle = "rgba(255,255,255,0.65)";
-  ctx.font = "600 16px Inter, Arial";
+  ctx.font = "bold 16px sans-serif";
   ctx.fillText("Trader Wallet", 115, 203);
 
   ctx.fillStyle = "#FFFFFF";
-  ctx.font = "700 22px Inter, Arial";
+  ctx.font = "bold 22px sans-serif";
   ctx.fillText(address, 115, 230);
 
   const activityRank = ranks?.activity?.rank ?? null;
@@ -179,7 +179,7 @@ function generateTraderCard({ address, ranks }) {
   });
 
   ctx.fillStyle = "rgba(255,255,255,0.30)";
-  ctx.font = "600 14px Inter, Arial";
+  ctx.font = "bold 14px sans-serif";
   ctx.fillText(`app.brokex.trade`, 72, 540);
 
   return canvas.toBuffer("image/png");
