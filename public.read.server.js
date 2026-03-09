@@ -366,7 +366,10 @@ readApp.get("/trader/:address/ranks", (req, res) => {
 // GET /trader/:address/card.png - ZÉRO STOCKAGE, généré à la volée !
 readApp.get("/trader/:address/card.png", (req, res) => {
   try {
-    const address = normalizeAddress(req.params.address);
+    // On garde l'adresse originale pour l'affichage (avec les majuscules)
+    const rawAddress = req.params.address; 
+    const address = normalizeAddress(rawAddress);
+    
     if (!address || address.length < 10) return res.status(400).send("Invalid");
 
     // 1. On lit les stats direct dans SQLite
@@ -381,13 +384,18 @@ readApp.get("/trader/:address/card.png", (req, res) => {
     };
 
     // 2. On génère l'image (ça retourne juste un Buffer en mémoire)
-    const pngBuffer = generateTraderCard({ address, ranks });
+    // On utilise rawAddress pour garder le format visuel "0xCa3..."
+    const pngBuffer = generateTraderCard({ address: rawAddress, ranks });
 
-    // 3. On envoie l'image au navigateur direct
+    // 3. LA MAGIE EST ICI : On force le téléchargement avec "attachment"
     res.setHeader("Content-Type", "image/png");
+    res.setHeader("Content-Disposition", `attachment; filename="Brokex-Stats-${rawAddress.slice(0, 6)}.png"`);
+    
+    // 4. On envoie l'image au navigateur direct
     res.send(pngBuffer);
 
   } catch (err) {
+    console.error(err);
     res.status(500).send("Error");
   }
 });
