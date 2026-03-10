@@ -13,6 +13,7 @@ const { stmt } = require("./db");
 const writeRoutes = require("./write.routes");
 const { getAllExposures } = require("./services/exposures"); 
 const { generateTraderCard } = require("./services/image.service");
+const { initBaseFunding, getLiveFunding } = require("./services/funding.service");
 
 const PUBLIC_PORT = Number(process.env.PUBLIC_PORT || 7000);
 const PRIVATE_PORT = Number(process.env.PRIVATE_PORT || 7001);
@@ -451,9 +452,30 @@ readApp.get("/trader/:address/card.png", (req, res) => {
     res.status(500).send("Error");
   }
 });
+// GET /funding/live/:assetId
+// Récupère l'index de funding live SANS appeler la blockchain
+readApp.get("/funding/live/:assetId", (req, res) => {
+  try {
+    const assetId = toInt(req.params.assetId, "assetId");
+    const data = getLiveFunding(assetId);
 
-readApp.listen(PUBLIC_PORT, "0.0.0.0", () => {
-  console.log(`Public READ API: http://0.0.0.0:${PUBLIC_PORT}`);
+    if (!data) {
+      return res.status(404).json({ error: "Funding data not initialized for this asset yet or not supported" });
+    }
+
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ error: "Bad request" });
+  }
+});
+
+// On initialise le Funding AVANT de lancer l'API publique
+initBaseFunding().then(() => {
+  readApp.listen(PUBLIC_PORT, "0.0.0.0", () => {
+    console.log(`Public READ API: http://0.0.0.0:${PUBLIC_PORT}`);
+  });
+}).catch(err => {
+  console.error("Erreur critique lors de l'initialisation du funding:", err);
 });
 
 // --------------------

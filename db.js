@@ -3,6 +3,7 @@
 // Trade IDs are PROVIDED BY YOU (no autoincrement).
 
 const Database = require("better-sqlite3");
+const { updateFundingForAsset } = require("./services/funding.service");
 
 const DB_PATH = process.env.DB_PATH || "trades.db";
 
@@ -265,24 +266,41 @@ function triggerCardUpdate(trader) {
   });
 }
 
+function triggerFundingUpdate(assetId) {
+  if (assetId === undefined) return;
+  setImmediate(() => {
+    updateFundingForAsset(assetId).catch(() => {});
+  });
+} 
+
 const tx = {
   upsertTrade: db.transaction((payload) => {
     stmt.upsertTrade.run(payload);
-    return stmt.getTradeById.get(payload.id);
+    const t = stmt.getTradeById.get(payload.id);
+    if (t) triggerFundingUpdate(t.assetId); // <-- Déclenche la MAJ Funding
+    return t;
   }),
 
   patchTrade: db.transaction((payload) => {
     const info = stmt.patchTrade.run(payload);
     if (info.changes === 0) return null;
-    return stmt.getTradeById.get(payload.id);
+    const t = stmt.getTradeById.get(payload.id);
+    if (t) triggerFundingUpdate(t.assetId); // <-- Déclenche la MAJ Funding
+    return t;
   }),
 
   batchPatchStates: db.transaction((patches) => {
     let updated = 0;
+    const assetsToUpdate = new Set();
     for (const p of patches) {
       const info = stmt.patchState.run(p);
-      if (info.changes) updated += 1;
+      if (info.changes) {
+        updated += 1;
+        const t = stmt.getTradeById.get(p.id);
+        if (t) assetsToUpdate.add(t.assetId);
+      }
     }
+    assetsToUpdate.forEach(triggerFundingUpdate); // <-- Déclenche la MAJ Funding (1 fois par actif)
     return updated;
   }),
 
