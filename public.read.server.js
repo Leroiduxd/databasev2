@@ -362,7 +362,57 @@ readApp.get("/trader/:address/ranks", (req, res) => {
     res.status(500).json({ error: "Failed to fetch trader ranks" });
   }
 });
+// --- SYSTÈME DE POINTS ---
 
+// Classement Top 100 par points
+readApp.get("/traders/points", (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const rows = stmt.getPointsLeaderboard.all(limit);
+    
+    const leaderboard = rows.map((r, index) => ({
+      rank: index + 1,
+      trader: r.trader,
+      points: Math.round(r.points * 100) / 100,
+      breakdown: {
+        pointsFromTrades: r.totalTrades,
+        pointsFromVolume: Math.round((r.totalVolumeE6 / 1000000000) * 100) / 100,
+        pointsFromPnl: Math.max(0, Math.round((r.totalPnlE6 / 1000000) * 100) / 100)
+      }
+    }));
+
+    res.json({ success: true, limit, data: leaderboard });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch points leaderboard" });
+  }
+});
+
+// Points d'un trader spécifique
+readApp.get("/trader/:address/points", (req, res) => {
+  try {
+    const address = normalizeAddress(req.params.address);
+    if (!address || address.length < 10) return res.status(400).send("Invalid address");
+
+    const row = stmt.getTraderPoints.get(address);
+
+    if (!row) {
+      return res.json({ success: true, trader: address, points: 0, breakdown: null });
+    }
+
+    res.json({
+      success: true,
+      trader: address,
+      points: Math.round(row.points * 100) / 100,
+      breakdown: {
+        pointsFromTrades: row.totalTrades,
+        pointsFromVolume: Math.round((row.totalVolumeE6 / 1000000000) * 100) / 100,
+        pointsFromPnl: Math.max(0, Math.round((row.totalPnlE6 / 1000000) * 100) / 100)
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch trader points" });
+  }
+});
 // GET /trader/:address/card.png - ZÉRO STOCKAGE, généré à la volée !
 readApp.get("/trader/:address/card.png", (req, res) => {
   try {
