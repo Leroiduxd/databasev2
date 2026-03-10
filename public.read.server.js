@@ -482,13 +482,16 @@ readApp.get("/spreads/base", (req, res) => {
   }
 });
 
-// On initialise le Funding AVANT de lancer l'API publique
-initBaseFunding().then(() => {
+// On initialise le Funding ET le Spread AVANT de lancer l'API publique
+Promise.all([
+  initBaseFunding(),
+  initBaseSpreads()
+]).then(() => {
   readApp.listen(PUBLIC_PORT, "0.0.0.0", () => {
     console.log(`Public READ API: http://0.0.0.0:${PUBLIC_PORT}`);
   });
 }).catch(err => {
-  console.error("Erreur critique lors de l'initialisation du funding:", err);
+  console.error("Erreur critique lors de l'initialisation:", err);
 });
 
 // --------------------
