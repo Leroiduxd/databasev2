@@ -14,9 +14,11 @@ const writeRoutes = require("./write.routes");
 const { getAllExposures } = require("./services/exposures"); 
 const { generateTraderCard } = require("./services/image.service");
 const { initBaseFunding, getLiveFunding } = require("./services/funding.service");
+const { initBaseSpreads, getAllBaseSpreads } = require("./services/spread.service");
 
 const PUBLIC_PORT = Number(process.env.PUBLIC_PORT || 7000);
 const PRIVATE_PORT = Number(process.env.PRIVATE_PORT || 7001);
+
 
 function normalizeAddress(addr) {
   if (typeof addr !== "string") return "";
@@ -466,6 +468,17 @@ readApp.get("/funding/live/:assetId", (req, res) => {
     res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ error: "Bad request" });
+  }
+});
+
+// GET /spreads/base
+// Récupère les spreads de base de tous les actifs (WAD)
+readApp.get("/spreads/base", (req, res) => {
+  try {
+    const data = getAllBaseSpreads();
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch base spreads" });
   }
 });
 
