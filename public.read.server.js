@@ -471,6 +471,27 @@ readApp.get("/funding/live/:assetId", (req, res) => {
   }
 });
 
+// GET /match/liquidations
+// Retourne les IDs des trades qui ont perdu 90% ou plus de leur marge
+readApp.get("/match/liquidations", (req, res) => {
+  try {
+    const assetId = toInt(req.query.assetId, "assetId");
+    const marketE6 = parseMarketE6(req.query);
+
+    // On passe l'assetId, et 2 fois le marketE6 (une fois pour le calcul Long, une fois pour le calcul Short)
+    const rows = stmt.matchLiquidations.all(assetId, marketE6, marketE6);
+
+    // On renvoie un tableau simple avec juste les IDs à liquider
+    res.json({ 
+      assetId, 
+      marketE6, 
+      liquidations: rows.map(r => r.id) 
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message || "Bad request" });
+  }
+});
+
 // GET /spreads/base
 // Récupère les spreads de base de tous les actifs (WAD)
 readApp.get("/spreads/base", (req, res) => {

@@ -111,6 +111,24 @@ initDb();
 
 const stmt = {
   // --- GAMIFICATION : SYSTÈME DE POINTS ---
+
+  matchLiquidations: db.prepare(`
+    SELECT id
+    FROM trades
+    WHERE assetId = ? AND state = 1
+      AND (
+        (isLong = 1 AND 
+          (CAST(openPrice AS REAL) - ?) * CAST(lotSize AS REAL) * (CASE assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) 
+          >= 0.9 * CAST(marginUsdc AS REAL)
+        )
+        OR 
+        (isLong = 0 AND 
+          (? - CAST(openPrice AS REAL)) * CAST(lotSize AS REAL) * (CASE assetId WHEN 0 THEN 0.01 WHEN 1 THEN 0.01 WHEN 5500 THEN 0.01 WHEN 5501 THEN 0.1 WHEN 90 THEN 10 WHEN 14 THEN 100 WHEN 16 THEN 100 WHEN 3 THEN 1000 WHEN 15 THEN 1000 ELSE 1 END) 
+          >= 0.9 * CAST(marginUsdc AS REAL)
+        )
+      );
+  `),
+  
   getPointsLeaderboard: db.prepare(`
     SELECT 
       trader,
