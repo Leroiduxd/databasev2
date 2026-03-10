@@ -17,7 +17,7 @@ const ABI = [
     "function fundingStates(uint32) view returns (uint64 lastUpdate, uint128 longFundingIndex, uint128 shortFundingIndex)"
 ];
 
-const provider = new ethers.JsonRpcProvider(RPC_URL);
+const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 const coreContract = new ethers.Contract(CORE_ADDRESS, ABI, provider);
 
 // CACHE EN MÉMOIRE
@@ -60,7 +60,7 @@ async function initBaseFunding() {
         try {
             const assetData = await coreContract.assets(assetId);
             // Index 3 correspond au uint64 baseFundingRate dans ton ABI
-            baseRates[assetId] = BigInt(assetData[3]); 
+            baseRates[assetId] = BigInt(assetData[3].toString()); 
             
             // On initialise le cache direct
             await updateFundingForAsset(assetId); 
