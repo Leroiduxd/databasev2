@@ -2,8 +2,8 @@
 /**
  * executor.multi.js
  * - Subscribe Supra WS to all PAIRS
- * - For each tick: call /match/entry and /match/exits on your public read API
- * - Execute on CORE: executeOrder / executeStopOrTakeProfit with Supra proof
+ * - For each tick: call /match/entry, /match/exits, and /match/liquidations on your public read API
+ * - Execute on CORE: executeOrder / executeStopOrTakeProfit / liquidatePosition with Supra proof
  * - Wallet rotation: 1 tx/sec per wallet
  */
 
@@ -58,10 +58,7 @@ const LP_FREE_TTL_MS = Number(process.env.LP_FREE_TTL_MS || 1500);
 const WSS_NO_TICK_TIMEOUT_MS = Number(process.env.WSS_NO_TICK_TIMEOUT_MS || 8000);
 
 // --------------------
-// SUPRA PAIRS + MAPS (yours)
-// --------------------
-// --------------------
-// SUPRA PAIRS + MAPS (Crypto uniquement)
+// SUPRA PAIRS + MAPS
 // --------------------
 const PAIRS = [
   "btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "avax_usdt", 
@@ -291,6 +288,14 @@ async function main() {
         return;
       }
 
+      if (kind === "liquidation") {
+        const tx = await core.liquidatePosition(tradeId, proof);
+        console.log(`[TX] liquidatePosition assetId=${assetId} tradeId=${tradeId} from=${wallet.address} hash=${tx.hash}`);
+        await tx.wait(1);
+        console.log(`[OK] liquidatePosition tradeId=${tradeId}`);
+        return;
+      }
+
       throw new Error(`Unknown kind ${kind}`);
 
     } catch (err) {
@@ -371,8 +376,13 @@ async function main() {
             `${READ_BASE}/match/exits?assetId=${assetId}&market=${marketE6}&unit=e6`
           );
 
+          const liqs = await httpGetJson(
+            `${READ_BASE}/match/liquidations?assetId=${assetId}&market=${marketE6}&unit=e6`
+          );
+
           const entryIds = [...(entry.limit || []), ...(entry.stop || [])];
           const exitIds = [...(exits.stopLoss || []), ...(exits.takeProfit || [])];
+          const liqIds = liqs.liquidations || [];
 
           for (const id of entryIds) {
             executeOnchain({ kind: "entry", tradeId: id, assetId })
@@ -383,6 +393,12 @@ async function main() {
           for (const id of exitIds) {
             executeOnchain({ kind: "exit", tradeId: id, assetId })
               .catch((e) => console.error("[ERR] executeStopOrTakeProfit", { assetId, id }, e.message));
+            await sleep(5);
+          }
+
+          for (const id of liqIds) {
+            executeOnchain({ kind: "liquidation", tradeId: id, assetId })
+              .catch((e) => console.error("[ERR] liquidatePosition", { assetId, id }, e.message));
             await sleep(5);
           }
         } catch (e) {
