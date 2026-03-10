@@ -128,19 +128,27 @@ const stmt = {
   `),
 
   getTraderPoints: db.prepare(`
-    SELECT 
-      trader,
-      COUNT(id) as totalTrades,
-      SUM(COALESCE(volume, 0)) as totalVolumeE6,
-      SUM(COALESCE(pnl, 0)) as totalPnlE6,
-      (
-        MAX(0, CAST(SUM(COALESCE(pnl, 0)) AS REAL) / 1000000.0) +
-        (CAST(SUM(COALESCE(volume, 0)) AS REAL) / 1000000000.0) +
-        COUNT(id)
-      ) as points
-    FROM trades_metrics
-    WHERE trader = ?
-    GROUP BY trader;
+    WITH TraderPoints AS (
+      SELECT 
+        trader,
+        COUNT(id) as totalTrades,
+        SUM(COALESCE(volume, 0)) as totalVolumeE6,
+        SUM(COALESCE(pnl, 0)) as totalPnlE6,
+        (
+          MAX(0, CAST(SUM(COALESCE(pnl, 0)) AS REAL) / 1000000.0) +
+          (CAST(SUM(COALESCE(volume, 0)) AS REAL) / 1000000000.0) +
+          COUNT(id)
+        ) as points
+      FROM trades_metrics
+      GROUP BY trader
+    ),
+    RankedTraders AS (
+      SELECT 
+        *,
+        RANK() OVER (ORDER BY points DESC) as rank
+      FROM TraderPoints
+    )
+    SELECT * FROM RankedTraders WHERE trader = ?;
   `),
   getTradeById: db.prepare(`SELECT * FROM trades WHERE id = ?;`),
   getMaxTradeId: db.prepare(`SELECT MAX(id) as maxId FROM trades;`),

@@ -388,6 +388,7 @@ readApp.get("/traders/points", (req, res) => {
 });
 
 // Points d'un trader spécifique
+// Points et Classement d'un trader spécifique
 readApp.get("/trader/:address/points", (req, res) => {
   try {
     const address = normalizeAddress(req.params.address);
@@ -396,12 +397,13 @@ readApp.get("/trader/:address/points", (req, res) => {
     const row = stmt.getTraderPoints.get(address);
 
     if (!row) {
-      return res.json({ success: true, trader: address, points: 0, breakdown: null });
+      return res.json({ success: true, trader: address, rank: null, points: 0, breakdown: null });
     }
 
     res.json({
       success: true,
       trader: address,
+      rank: row.rank, // <-- LE CLASSEMENT EST LÀ
       points: Math.round(row.points * 100) / 100,
       breakdown: {
         pointsFromTrades: row.totalTrades,
