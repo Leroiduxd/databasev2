@@ -471,6 +471,86 @@ readApp.get("/funding/live/:assetId", (req, res) => {
   }
 });
 
+// GET /stats/funding/all
+// Récupère le funding index moyen pondéré pour TOUS les actifs en une seule requête
+readApp.get("/stats/funding/all", (req, res) => {
+  try {
+    const rows = stmt.getAllWeightedFundingIndices.all();
+
+    // On prépare un objet vide pour stocker les résultats par assetId
+    const result = {};
+
+    for (const row of rows) {
+      const assetId = row.assetId;
+      
+      // Si l'actif n'est pas encore dans l'objet, on l'initialise
+      if (!result[assetId]) {
+        result[assetId] = {
+          longAvgFundingIndex: "0",
+          shortAvgFundingIndex: "0",
+          longTotalLots: 0,
+          shortTotalLots: 0
+        };
+      }
+
+      // On remplit les données Long ou Short
+      if (row.isLong === 1) {
+        result[assetId].longAvgFundingIndex = Math.round(row.avgFundingIndex).toString();
+        result[assetId].longTotalLots = row.totalLots;
+      } else {
+        result[assetId].shortAvgFundingIndex = Math.round(row.avgFundingIndex).toString();
+        result[assetId].shortTotalLots = row.totalLots;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch all weighted funding indices" });
+  }
+}); 
+
+// GET /stats/funding/:assetId
+// Récupère le funding index moyen pondéré par la taille des lots pour les Longs et les Shorts ouverts
+readApp.get("/stats/funding/:assetId", (req, res) => {
+  try {
+    const assetId = toInt(req.params.assetId, "assetId");
+    const rows = stmt.getWeightedFundingIndex.all(assetId);
+
+    // On formate la réponse pour séparer Long et Short proprement
+    const result = {
+      assetId: assetId,
+      long: { avgFundingIndex: 0, totalLots: 0 },
+      short: { avgFundingIndex: 0, totalLots: 0 }
+    };
+
+    for (const row of rows) {
+      if (row.isLong === 1) {
+        result.long.avgFundingIndex = row.avgFundingIndex;
+        result.long.totalLots = row.totalLots;
+      } else {
+        result.short.avgFundingIndex = row.avgFundingIndex;
+        result.short.totalLots = row.totalLots;
+      }
+    }
+
+    // On convertit les E18 en strings ou entiers pour éviter les bugs de précision
+    res.json({
+      success: true,
+      data: {
+        longAvgFundingIndex: Math.round(result.long.avgFundingIndex).toString(),
+        shortAvgFundingIndex: Math.round(result.short.avgFundingIndex).toString(),
+        longTotalLots: result.long.totalLots,
+        shortTotalLots: result.short.totalLots
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to fetch weighted funding index" });
+  }
+});
+
 // GET /match/liquidations
 // Retourne les IDs des trades qui ont perdu 90% ou plus de leur marge
 readApp.get("/match/liquidations", (req, res) => {

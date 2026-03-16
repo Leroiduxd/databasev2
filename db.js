@@ -205,6 +205,21 @@ const stmt = {
     WHERE state = 0 AND assetId = ?;
   `),
 
+  // --- MOYENNE PONDÉRÉE DU FUNDING INDEX (LONG VS SHORT) ---
+  getWeightedFundingIndex: db.prepare(`
+    SELECT 
+      isLong,
+      CASE 
+        WHEN SUM(CAST(lotSize AS REAL)) > 0 
+        THEN SUM(CAST(fundingIndex AS REAL) * CAST(lotSize AS REAL)) / SUM(CAST(lotSize AS REAL))
+        ELSE 0 
+      END as avgFundingIndex,
+      SUM(CAST(lotSize AS REAL)) as totalLots
+    FROM trades 
+    WHERE assetId = ? AND state = 1
+    GROUP BY isLong;
+  `),
+
   // --- TRADES FERMÉS (STATE 2) PAR ACTIF ---
   getClosedTradesByAssetId: db.prepare(`
     SELECT * FROM trades 
@@ -243,7 +258,24 @@ const stmt = {
   `),
 
   getVolume24h: db.prepare(`SELECT SUM(m.volume) as volume24h FROM trades_metrics m JOIN trades t ON t.id = m.id WHERE t.state IN (1, 2) AND t.openTimestamp >= ?;`),
+  // --- FUNDING MOYEN PONDÉRÉ POUR TOUS LES ACTIFS D'UN COUP ---
+  getAllWeightedFundingIndices: db.prepare(`
+    SELECT 
+      assetId,
+      isLong,
+      CASE 
+        WHEN SUM(CAST(lotSize AS REAL)) > 0 
+        THEN SUM(CAST(fundingIndex AS REAL) * CAST(lotSize AS REAL)) / SUM(CAST(lotSize AS REAL))
+        ELSE 0 
+      END as avgFundingIndex,
+      SUM(CAST(lotSize AS REAL)) as totalLots
+    FROM trades 
+    WHERE state = 1
+    GROUP BY assetId, isLong;
+  `),
 };
+
+
 
 // --------------------
 // WRITE statements
