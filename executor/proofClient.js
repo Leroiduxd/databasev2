@@ -77,8 +77,11 @@ class PullServiceClient {
   }
 }
 
-// cache 1s
-const cache = new Map(); // key => {proof, ts}
+// --- LOGIQUE DE CACHE ANTI-STAMPEDE ---
+
+// Durée pendant laquelle on réutilise la même requête (1 seconde)
+const CACHE_TTL_MS = 1000; 
+const cache = new Map(); // Map de clés (paires) vers { proofPromise, ts }
 
 function makeKey(pairs) {
   return [...pairs].sort((a, b) => a - b).join(",");
@@ -96,12 +99,28 @@ function createProofFetcher({ doraRpc, chainType }) {
     const key = makeKey(pairIndexes);
     const now = Date.now();
     const hit = cache.get(key);
-    if (hit && now - hit.ts < 1000) return hit.proof;
 
-    const data = await client.getProof({ pair_indexes: pairIndexes, chain_type: chainType });
-    const proof = normalizeProof(data.proof_bytes);
-    cache.set(key, { proof, ts: now });
-    return proof;
+    // Si une requête a été lancée il y a moins d'une seconde, 
+    // on retourne sa Promesse (qu'elle soit en cours ou terminée).
+    if (hit && now - hit.ts < CACHE_TTL_MS) {
+      return hit.proofPromise;
+    }
+
+    // Sinon, on lance la vraie requête API
+    const fetchPromise = client.getProof({ pair_indexes: pairIndexes, chain_type: chainType })
+      .then(data => normalizeProof(data.proof_bytes))
+      .catch(err => {
+        // En cas d'erreur de Supra, on "nettoie" le cache pour permettre 
+        // aux appels suivants de réessayer tout de suite.
+        cache.delete(key);
+        throw err;
+      });
+
+    // On sauvegarde la Promesse dans le cache AVANT de faire "await"
+    cache.set(key, { proofPromise: fetchPromise, ts: now });
+
+    // On retourne la promesse, l'appelant fera "await fetchProof(...)"
+    return fetchPromise;
   };
 }
 
