@@ -3,10 +3,7 @@
 // You provide the trade id in the URL.
 
 const express = require("express");
-const { stmt, tx } = require("./db");
-
-// <-- AJOUT : Import du service des expositions
-const { updateExposure } = require("./services/exposures");
+const { stmt, tx, db } = require("./db"); // db importé pour le batch
 
 const router = express.Router();
 
@@ -43,8 +40,7 @@ function requireTradeExists(id) {
 
 /**
  * PUT /trade/:id
- * Full upsert (insert or replace/update) with your provided id.
- * Body fields are expected in E6 for prices.
+ * Full upsert (insert or replace/update) avec tous les champs du Smart Contract.
  */
 router.put("/trade/:id", (req, res) => {
   try {
@@ -57,38 +53,35 @@ router.put("/trade/:id", (req, res) => {
       assetId: toInt(b.assetId, "assetId"),
       isLong: toBoolInt(b.isLong, "isLong"),
       isLimit: toBoolInt(b.isLimit, "isLimit"),
-      leverage: b.leverage === undefined || b.leverage === null ? null : toInt(b.leverage, "leverage"),
-
-      openPrice: b.openPrice === undefined || b.openPrice === null ? null : toInt(b.openPrice, "openPrice"),
+      leverage: b.leverage == null ? null : toInt(b.leverage, "leverage"),
+      
+      openPrice: b.openPrice == null ? null : toInt(b.openPrice, "openPrice"),
       state: toInt(b.state, "state"),
-      openTimestamp: b.openTimestamp === undefined || b.openTimestamp === null ? null : toInt(b.openTimestamp, "openTimestamp"),
-      fundingIndex: b.fundingIndex === undefined || b.fundingIndex === null ? null : String(b.fundingIndex),
+      openTimestamp: b.openTimestamp == null ? null : toInt(b.openTimestamp, "openTimestamp"),
+      closeTimestamp: b.closeTimestamp == null ? null : toInt(b.closeTimestamp, "closeTimestamp"),
+      fundingIndex: b.fundingIndex == null ? null : String(b.fundingIndex),
 
-      closePrice: b.closePrice === undefined || b.closePrice === null ? 0 : toInt(b.closePrice, "closePrice"),
-      lotSize: b.lotSize === undefined || b.lotSize === null ? null : toInt(b.lotSize, "lotSize"),
-      closedLotSize: b.closedLotSize === undefined || b.closedLotSize === null ? 0 : toInt(b.closedLotSize, "closedLotSize"),
+      closePrice: b.closePrice == null ? 0 : toInt(b.closePrice, "closePrice"),
+      lotSize: b.lotSize == null ? null : toInt(b.lotSize, "lotSize"),
+      closedLotSize: b.closedLotSize == null ? 0 : toInt(b.closedLotSize, "closedLotSize"),
 
-      stopLoss: b.stopLoss === undefined || b.stopLoss === null ? 0 : toInt(b.stopLoss, "stopLoss"),
-      takeProfit: b.takeProfit === undefined || b.takeProfit === null ? 0 : toInt(b.takeProfit, "takeProfit"),
+      stopLoss: b.stopLoss == null ? 0 : toInt(b.stopLoss, "stopLoss"),
+      takeProfit: b.takeProfit == null ? 0 : toInt(b.takeProfit, "takeProfit"),
 
-      lpLockedCapital: b.lpLockedCapital === undefined || b.lpLockedCapital === null ? null : String(b.lpLockedCapital),
-      marginUsdc: b.marginUsdc === undefined || b.marginUsdc === null ? null : String(b.marginUsdc),
+      lpLockedCapital: b.lpLockedCapital == null ? null : String(b.lpLockedCapital),
+      marginUsdc: b.marginUsdc == null ? null : String(b.marginUsdc),
+      totalFeesPaidUsdc: b.totalFeesPaidUsdc == null ? null : String(b.totalFeesPaidUsdc),
     };
 
     if (!payload.trader.startsWith("0x") || payload.trader.length < 10) {
       return res.status(400).json({ ok: false, error: "Invalid trader address" });
     }
 
-    // Minimal sanity: if Closed => closePrice must be set
     if (payload.state === 2 && (!payload.closePrice || payload.closePrice === 0)) {
       return res.status(400).json({ ok: false, error: "state=2 requires closePrice != 0" });
     }
 
     const trade = tx.upsertTrade(payload);
-    
-    // <-- AJOUT : Met à jour l'exposition de cet actif spécifique en arrière-plan
-    updateExposure(payload.assetId).catch(err => console.error(`[Exposures] Erreur maj expo ${payload.assetId}:`, err));
-
     res.json({ ok: true, trade });
   } catch (e) {
     res.status(e.status || 400).json({ ok: false, error: e.message || "Bad request" });
@@ -97,7 +90,7 @@ router.put("/trade/:id", (req, res) => {
 
 /**
  * PATCH /trade/:id
- * Partial updates: state, closePrice, stopLoss, takeProfit, closedLotSize, marginUsdc, lpLockedCapital, fundingIndex
+ * Mise à jour partielle (généralement utilisée pour les fermetures ou MAJ d'état rapides)
  */
 router.patch("/trade/:id", (req, res) => {
   try {
@@ -107,34 +100,35 @@ router.patch("/trade/:id", (req, res) => {
 
     const patch = {
       id,
-      state: b.state === undefined || b.state === null ? null : toInt(b.state, "state"),
-      closePrice: b.closePrice === undefined || b.closePrice === null ? null : toInt(b.closePrice, "closePrice"),
-      stopLoss: b.stopLoss === undefined || b.stopLoss === null ? null : toInt(b.stopLoss, "stopLoss"),
-      takeProfit: b.takeProfit === undefined || b.takeProfit === null ? null : toInt(b.takeProfit, "takeProfit"),
-      closedLotSize: b.closedLotSize === undefined || b.closedLotSize === null ? null : toInt(b.closedLotSize, "closedLotSize"),
-
-      marginUsdc: b.marginUsdc === undefined || b.marginUsdc === null ? null : String(b.marginUsdc),
-      lpLockedCapital: b.lpLockedCapital === undefined || b.lpLockedCapital === null ? null : String(b.lpLockedCapital),
-      fundingIndex: b.fundingIndex === undefined || b.fundingIndex === null ? null : String(b.fundingIndex),
+      state: b.state == null ? null : toInt(b.state, "state"),
+      closePrice: b.closePrice == null ? null : toInt(b.closePrice, "closePrice"),
+      closeTimestamp: b.closeTimestamp == null ? null : toInt(b.closeTimestamp, "closeTimestamp"),
+      closedLotSize: b.closedLotSize == null ? null : toInt(b.closedLotSize, "closedLotSize"),
     };
 
-    // If closing now, ensure closePrice exists (in patch or already stored)
     if (patch.state === 2) {
       const close = patch.closePrice ?? existing.closePrice;
       if (!close || close === 0) {
         return res.status(400).json({ ok: false, error: "state=2 requires closePrice != 0" });
       }
-      // if you want: auto-set full close if not provided
       if (patch.closedLotSize === null) patch.closedLotSize = existing.lotSize;
     }
 
-    const trade = tx.patchTrade(patch);
+    // On utilise stmt directement ici car patchTrade a été retiré de tx dans db.js
+    const info = stmt.patchState.run(patch);
+    if (info.changes === 0) return res.status(400).json({ ok: false, error: "No changes made" });
+    
+    const trade = stmt.getTradeById.get(id);
     res.json({ ok: true, trade });
   } catch (e) {
     res.status(e.status || 400).json({ ok: false, error: e.message || "Bad request" });
   }
 });
 
+/**
+ * POST /trades/batchUpsert
+ * Synchronisation massive (ex: au démarrage du bot depuis le RPC)
+ */
 router.post("/trades/batchUpsert", (req, res) => {
     try {
       const items = req.body?.trades;
@@ -145,7 +139,6 @@ router.post("/trades/batchUpsert", (req, res) => {
         return res.status(400).json({ ok: false, error: "Too many trades in one batch (max 2000)" });
       }
   
-      // Build payloads like PUT /trade/:id expects, but in batch.
       const payloads = items.map((b) => {
         const id = Number(b.id);
         if (!Number.isFinite(id)) throw new Error("Invalid id in batch");
@@ -159,42 +152,39 @@ router.post("/trades/batchUpsert", (req, res) => {
           assetId: toInt(b.assetId, "assetId"),
           isLong: toBoolInt(b.isLong, "isLong"),
           isLimit: toBoolInt(b.isLimit, "isLimit"),
-          leverage: b.leverage === undefined || b.leverage === null ? null : toInt(b.leverage, "leverage"),
-          openPrice: b.openPrice === undefined || b.openPrice === null ? null : toInt(b.openPrice, "openPrice"),
+          leverage: b.leverage == null ? null : toInt(b.leverage, "leverage"),
+          openPrice: b.openPrice == null ? null : toInt(b.openPrice, "openPrice"),
           state: toInt(b.state, "state"),
-          openTimestamp: b.openTimestamp === undefined || b.openTimestamp === null ? null : toInt(b.openTimestamp, "openTimestamp"),
-          fundingIndex: b.fundingIndex === undefined || b.fundingIndex === null ? null : String(b.fundingIndex),
-          closePrice: b.closePrice === undefined || b.closePrice === null ? 0 : toInt(b.closePrice, "closePrice"),
-          lotSize: b.lotSize === undefined || b.lotSize === null ? null : toInt(b.lotSize, "lotSize"),
-          closedLotSize: b.closedLotSize === undefined || b.closedLotSize === null ? 0 : toInt(b.closedLotSize, "closedLotSize"),
-          stopLoss: b.stopLoss === undefined || b.stopLoss === null ? 0 : toInt(b.stopLoss, "stopLoss"),
-          takeProfit: b.takeProfit === undefined || b.takeProfit === null ? 0 : toInt(b.takeProfit, "takeProfit"),
-          lpLockedCapital: b.lpLockedCapital === undefined || b.lpLockedCapital === null ? null : String(b.lpLockedCapital),
-          marginUsdc: b.marginUsdc === undefined || b.marginUsdc === null ? null : String(b.marginUsdc),
+          openTimestamp: b.openTimestamp == null ? null : toInt(b.openTimestamp, "openTimestamp"),
+          closeTimestamp: b.closeTimestamp == null ? null : toInt(b.closeTimestamp, "closeTimestamp"),
+          fundingIndex: b.fundingIndex == null ? null : String(b.fundingIndex),
+          closePrice: b.closePrice == null ? 0 : toInt(b.closePrice, "closePrice"),
+          lotSize: b.lotSize == null ? null : toInt(b.lotSize, "lotSize"),
+          closedLotSize: b.closedLotSize == null ? 0 : toInt(b.closedLotSize, "closedLotSize"),
+          stopLoss: b.stopLoss == null ? 0 : toInt(b.stopLoss, "stopLoss"),
+          takeProfit: b.takeProfit == null ? 0 : toInt(b.takeProfit, "takeProfit"),
+          lpLockedCapital: b.lpLockedCapital == null ? null : String(b.lpLockedCapital),
+          marginUsdc: b.marginUsdc == null ? null : String(b.marginUsdc),
+          totalFeesPaidUsdc: b.totalFeesPaidUsdc == null ? null : String(b.totalFeesPaidUsdc),
         };
       });
   
-      // Do one transaction for the whole batch (fast + safe)
-      const { db, stmt } = require("./db");
       const runBatch = db.transaction((ps) => {
         for (const p of ps) stmt.upsertTrade.run(p);
         return ps.length;
       });
   
       const count = runBatch(payloads);
-      
-      // <-- AJOUT : Mettre à jour l'exposition une seule fois par actif concerné dans le lot
-      const uniqueAssetIds = [...new Set(payloads.map(p => p.assetId))];
-      for (const assetId of uniqueAssetIds) {
-        updateExposure(assetId).catch(err => console.error(`[Exposures] Erreur maj expo batch ${assetId}:`, err));
-      }
-
       res.json({ ok: true, upserted: count });
     } catch (e) {
       res.status(e.status || 400).json({ ok: false, error: e.message || "Bad request" });
     }
 });
 
+/**
+ * POST /trades/batchPatchStates
+ * Mise à jour massive de statuts (utile pour les liquidations de masse ou exécutions groupées)
+ */
 router.post("/trades/batchPatchStates", (req, res) => {
   try {
     const items = req.body?.patches;
@@ -206,50 +196,20 @@ router.post("/trades/batchPatchStates", (req, res) => {
     }
 
     const patches = items.map((b) => {
-      const id = toInt(b.id, "id");
       return {
-        id,
-        state: b.state === undefined || b.state === null ? null : toInt(b.state, "state"),
-        closePrice: b.closePrice === undefined || b.closePrice === null ? null : toInt(b.closePrice, "closePrice"),
-        closedLotSize: b.closedLotSize === undefined || b.closedLotSize === null ? null : toInt(b.closedLotSize, "closedLotSize"),
-        fundingIndex: b.fundingIndex === undefined || b.fundingIndex === null ? null : String(b.fundingIndex),
+        id: toInt(b.id, "id"),
+        state: b.state == null ? null : toInt(b.state, "state"),
+        closePrice: b.closePrice == null ? null : toInt(b.closePrice, "closePrice"),
+        closeTimestamp: b.closeTimestamp == null ? null : toInt(b.closeTimestamp, "closeTimestamp"),
+        closedLotSize: b.closedLotSize == null ? null : toInt(b.closedLotSize, "closedLotSize"),
       };
     });
 
-    const { tx } = require("./db");
     const updated = tx.batchPatchStates(patches);
     res.json({ ok: true, updated });
   } catch (e) {
     res.status(e.status || 400).json({ ok: false, error: e.message || "Bad request" });
   }
 });
-
-router.post("/trades/batchPatchSLTP", (req, res) => {
-  try {
-    const items = req.body?.patches;
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ ok: false, error: "Body must include patches: []" });
-    }
-    if (items.length > 5000) {
-      return res.status(400).json({ ok: false, error: "Too many patches in one batch (max 5000)" });
-    }
-
-    const patches = items.map((b) => {
-      const id = toInt(b.id, "id");
-      return {
-        id,
-        stopLoss: b.stopLoss === undefined || b.stopLoss === null ? null : toInt(b.stopLoss, "stopLoss"),
-        takeProfit: b.takeProfit === undefined || b.takeProfit === null ? null : toInt(b.takeProfit, "takeProfit"),
-      };
-    });
-
-    const { tx } = require("./db");
-    const updated = tx.batchPatchSLTP(patches);
-    res.json({ ok: true, updated });
-  } catch (e) {
-    res.status(e.status || 400).json({ ok: false, error: e.message || "Bad request" });
-  }
-});
-  
 
 module.exports = router;
