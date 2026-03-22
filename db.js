@@ -3,13 +3,16 @@
 // Les IDs sont fournis par le Smart Contract (pas d'autoincrement).
 
 const Database = require("better-sqlite3");
-const DB_PATH = process.env.DB_PATH || "trades.db";
+const path = require("path");
+
+// <-- LA MAGIE EST ICI : on force le chemin absolu dans le dossier actuel
+const defaultDbPath = path.join(__dirname, "trades.db");
+const DB_PATH = process.env.DB_PATH || defaultDbPath;
 
 const db = new Database(DB_PATH, process.env.SQL_VERBOSE === "1"
   ? { verbose: console.log }
   : {}
 );
-
 // WAL pour des meilleures performances en lecture/écriture
 db.pragma("journal_mode = WAL");
 db.pragma("synchronous = NORMAL");
