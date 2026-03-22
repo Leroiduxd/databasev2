@@ -1,6 +1,7 @@
 // db.js
 // Base de données ultra-légère pour synchroniser les trades.
 // Les IDs sont fournis par le Smart Contract (pas d'autoincrement).
+require('dotenv').config();
 
 const Database = require("better-sqlite3");
 const path = require("path");
