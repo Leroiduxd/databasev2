@@ -16,6 +16,12 @@ const { spawn } = require("child_process");
 const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
+console.log("--- DEBUG ENV ---");
+console.log("Dossier du script (__dirname):", __dirname);
+console.log("Fichier .env cherché ici :", path.resolve(__dirname, ".env"));
+console.log("SUPRA_API_KEY présente ?", process.env.SUPRA_API_KEY ? "OUI" : "NON (VIDE)");
+console.log("------------------");
+
 
 const CORE_ABI = require("./coreAbi");
 
