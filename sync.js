@@ -11,8 +11,9 @@
  * - If id <= maxExistingId but missing in DB => full fetch
  *
  * Usage examples:
+ * node sync.js --mode full --catchup        <-- BOUCHE LES TROUS AUTOMATIQUEMENT
  * node sync.js --mode states --range 1 5000
- * node sync.js --mode full --missing-scan 1 40000
+ * node sync.js --mode full --ids 14,15
  */
 
 const pLimit = require("p-limit");
@@ -27,6 +28,9 @@ const ethers = ethersPkg.ethers ?? ethersPkg;
 // --------------------
 const BATCH_SIZE = 50;
 const RPC_CONCURRENCY = 20;
+
+// Utilitaire pour l'attente (1 seconde)
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --------------------
 // Minimal ABIs
@@ -88,13 +92,14 @@ const PAYMASTER_ABI = [
 // Helpers
 // --------------------
 function parseArgs(argv) {
-  const out = { mode: null, ids: null, range: null, missingScan: null };
+  const out = { mode: null, ids: null, range: null, missingScan: null, catchup: false };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--mode") out.mode = argv[++i];
     else if (a === "--ids") out.ids = argv[++i];
     else if (a === "--range") out.range = [Number(argv[++i]), Number(argv[++i])];
     else if (a === "--missing-scan") out.missingScan = [Number(argv[++i]), Number(argv[++i])];
+    else if (a === "--catchup") out.catchup = true;
   }
   return out;
 }
@@ -162,6 +167,9 @@ function tradeToPayload(id, t) {
 async function syncFull({ paymaster, ids }) {
   if (ids.length === 0) return { upserted: 0 };
 
+  console.log(`⏳ Attente 1 sec avant requête RPC pour ${ids.length} trade(s)...`);
+  await sleep(1000); // <-- LE DÉLAI EST ICI
+
   const trades = await paymaster.getTradesFromList(ids);
   const payloads = ids.map((id, i) => tradeToPayload(id, trades[i]));
 
@@ -190,6 +198,9 @@ async function syncStates({ paymaster, ids, maxExistingId }) {
   const needFull = [...missing]; 
 
   if (present.length > 0) {
+    console.log(`⏳ Attente 1 sec avant vérification des états...`);
+    await sleep(1000); // <-- LE DÉLAI EST ICI AUSSI
+
     const queryIds = present.map(p => p.id);
     const states = await paymaster.getTradeStatesFromList(queryIds);
     
@@ -220,7 +231,7 @@ async function main() {
   const mode = args.mode;
 
   if (!["full", "states"].includes(mode)) {
-    console.error("Usage: node sync.js --mode full|states [--ids 1,2,3 | --range start count | --missing-scan start end]");
+    console.error("Usage: node sync.js --mode full|states [--ids 1,2,3 | --range 1 50 | --catchup]");
     process.exit(1);
   }
 
@@ -231,8 +242,9 @@ async function main() {
   const core = new ethers.Contract(cfg.CORE_ADDRESS, CORE_ABI, provider);
   const paymaster = new ethers.Contract(cfg.PAYMASTER_ADDRESS, PAYMASTER_ABI, provider);
 
+  // CORRECTION: On enlève le "- 1" pour avoir le vrai max ID
   const nextId = toIntSafeBN(await core.nextTradeID());
-  const maxExistingId = Number(nextId) - 1; 
+  const maxExistingId = Number(nextId); 
 
   if (maxExistingId <= 0) {
     console.log("No trades onchain yet. Nothing to sync.");
@@ -247,23 +259,37 @@ async function main() {
     let [start, count] = args.range;
     start = Math.max(1, start);
     for (let i = 0; i < count; i++) ids.push(start + i);
+  } else if (args.catchup) {
+    // --- NOUVEAU : On cherche tous les trous de 1 à maxExistingId
+    for (let id = 1; id <= maxExistingId; id++) {
+      if (!stmt.getTradeById.get(id)) {
+        ids.push(id);
+      }
+    }
+    console.log(`[CATCHUP] Scan terminé. ${ids.length} trade(s) manquant(s) trouvé(s) sur ${maxExistingId} maximum.`);
+    if (ids.length === 0) {
+      console.log("La base de données est déjà à jour !");
+      process.exit(0);
+    }
   } else if (args.missingScan) {
     const [start, end] = args.missingScan;
     const realStart = Math.max(1, start);
     const realEnd = Math.min(end, maxExistingId);
     
     for (let id = realStart; id <= realEnd; id++) {
-      // LECTURE DIRECTE POUR SCAN
       if (!stmt.getTradeById.get(id)) ids.push(id);
     }
     console.log(`Missing in DB within [${realStart}..${realEnd}]: ${ids.length}`);
   } else {
-    console.error("Provide --ids or --range or --missing-scan");
+    console.error("Provide --ids, --range, --catchup or --missing-scan");
     process.exit(1);
   }
 
-  ids = ids.filter((id) => id >= 1 && id <= maxExistingId);
-
+  // Sécurité: on ne bloque pas si l'utilisateur a tapé des IDs manuellement ou via le listener
+  if (!args.ids) {
+    ids = ids.filter((id) => id >= 1 && id <= maxExistingId);
+  }
+  
   const limit = pLimit(RPC_CONCURRENCY);
   const batches = chunk(ids, BATCH_SIZE);
   let totals = { upserted: 0 };
@@ -289,7 +315,6 @@ async function main() {
   try {
     await Promise.all(tasks);
   } finally {
-    // Fermeture propre de la DB à la fin du script
     db.close();
   }
 
