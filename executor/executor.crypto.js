@@ -7,8 +7,6 @@
  * - Intelligent Execution Queue with 60s TTL and deduplication
  */
 
-const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const fetch = require("node-fetch");
 const http = require("http");
@@ -16,6 +14,8 @@ const { WebSocket } = require("ws");
 const { ethers } = require("ethers");
 const { spawn } = require("child_process");
 const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
+
 
 const CORE_ABI = require("./coreAbi");
 
