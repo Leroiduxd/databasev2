@@ -7,7 +7,8 @@
  * - Intelligent Execution Queue with 60s TTL and deduplication
  */
 
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const fetch = require("node-fetch");
 const http = require("http");
