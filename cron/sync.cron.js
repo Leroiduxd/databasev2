@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
  * cron/sync.cron.js
- * Lance des sync périodiques (states + sltp).
- * - Toutes les heures: range 1..maxExistingId
- * - Optionnel: au démarrage, lance une première fois après 10s
+ * Lance des sync périodiques (states + sltp + vérification des trous).
+ * - Toutes les 10 minutes.
  */
 
 const cron = require("node-cron");
@@ -11,40 +10,40 @@ const { spawn } = require("child_process");
 
 function runSync(args, label) {
   return new Promise((resolve) => {
+    console.log(`[cron] Starting ${label}...`);
     const p = spawn("node", ["sync.js", ...args], { stdio: "inherit" });
     p.on("close", (code) => {
-      console.log(`[cron] ${label} exit code=${code}`);
+      console.log(`[cron] ${label} finished with exit code=${code}`);
       resolve(code);
     });
   });
 }
 
-async function runHourly() {
-  // On utilise --range 1 N (N= count), et sync.js va filter <= maxExistingId onchain.
-  // Donc on met un count "très grand" et le script coupera tout seul.
-  // Mais ici on veut plutôt faire: range 1 1000000, comme ça ça couvre tout.
-  // Si tu veux être plus strict, je te donne une variante après.
-  const COUNT_BIG = 1000000;
+async function runPeriodicSync() {
+  const COUNT_BIG = 10000000; // Une limite haute arbitraire, sync.js la coupera à maxExistingId
+  
+  console.log(`\n=== [cron] Periodic sync cycle starting @ ${new Date().toISOString()} ===`);
 
-  console.log(`[cron] Hourly sync starting @ ${new Date().toISOString()}`);
+  // 1) Vérification et récupération des trous (missing IDs)
+  await runSync(["--mode", "full", "--missing-scan", "1", String(COUNT_BIG)], "missing-scan");
 
-  // 1) states (et full fetch si état change, comme ton code le fait)
+  // 2) Mise à jour des states
   await runSync(["--mode", "states", "--range", "1", String(COUNT_BIG)], "states");
 
-  // 2) sltp
+  // 3) Mise à jour des SL/TP
   await runSync(["--mode", "sltp", "--range", "1", String(COUNT_BIG)], "sltp");
 
-  console.log(`[cron] Hourly sync done @ ${new Date().toISOString()}`);
+  console.log(`=== [cron] Periodic sync cycle done @ ${new Date().toISOString()} ===\n`);
 }
 
-// Petit run au démarrage (pratique après reboot)
+// Lancement initial 10 secondes après le démarrage
 setTimeout(() => {
-  runHourly().catch((e) => console.error("[cron] startup run error:", e));
+  runPeriodicSync().catch((e) => console.error("[cron] startup run error:", e));
 }, 10_000);
 
-// Toutes les heures à minute 0 (UTC locale machine)
+// Lancement toutes les 10 minutes
 cron.schedule("*/10 * * * *", () => {
-  runHourly().catch((e) => console.error("[cron] hourly error:", e));
+  runPeriodicSync().catch((e) => console.error("[cron] periodic error:", e));
 });
 
-console.log("[cron] Sync cron started. Schedule: 0 * * * *");
+console.log("[cron] Sync cron started. Schedule: */10 * * * *");
