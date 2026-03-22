@@ -5,8 +5,8 @@ module.exports = {
     WSS_URL: "wss://atlantic.dplabs-internal.com", // optionnel, pas utilisé par sync.js mais utile plus tard pour listener
   
     // Contracts
-    CORE_ADDRESS: "0x2F3B27EFeBDa093b48b568d6F2C3aad7F64f7DEc",
-    PAYMASTER_ADDRESS: "0xC7eA1B52D20d0B4135ae5cc8E4225b3F12eA279B",
+    CORE_ADDRESS: "0xE8c2F27822BeD03BD1Fd6C4BcEE5E92cD0D99B02",
+    PAYMASTER_ADDRESS: "0x969b078E1b4f08D3BEe7d2A83B9d2af114e84eE4",
   
     // Local private write server
     WRITE_BASE_URL: "http://127.0.0.1:7001",
